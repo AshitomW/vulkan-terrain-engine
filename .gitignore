@@ -1,0 +1,14 @@
+# Build directory
+build/
+bin/
+out/
+
+# IDE and OS files
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Compiled binary assets if generated outside build
+shaders/*.spv
