@@ -1,0 +1,261 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(std430, set = 0, binding = 0) buffer TerrainBuffer {
+    vec4 data[];
+};
+
+layout(push_constant) uniform ComputePC {
+    vec4 chunkOffset;
+    vec4 noiseParams1;
+    vec4 noiseParams2;
+    uvec4 config;
+} pc;
+
+uint hash(uvec2 p, uint seed) {
+    uint h = seed;
+    h ^= p.x + 0x9e3779b9u + (h << 6) + (h >> 2);
+    h ^= p.y + 0x9e3779b9u + (h << 6) + (h >> 2);
+    h ^= h >> 16;
+    h *= 0x85ebca6bu;
+    h ^= h >> 13;
+    h *= 0xc2b2ae35u;
+    h ^= h >> 16;
+    return h;
+}
+
+vec2 hash2(vec2 p, uint seed) {
+    uvec2 ip = uvec2(ivec2(floor(p)) + 100000);
+    uint h1 = hash(ip, seed);
+    uint h2 = hash(ip + uvec2(137u, 269u), seed);
+    return vec2(
+        float(h1 & 0x00FFFFFFu) / 16777215.0,
+        float(h2 & 0x00FFFFFFu) / 16777215.0
+    ) * 2.0 - 1.0;
+}
+
+float gradientNoise(vec2 p, uint seed) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+    vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+
+    vec2 g00 = hash2(i + vec2(0.0, 0.0), seed);
+    vec2 g10 = hash2(i + vec2(1.0, 0.0), seed);
+    vec2 g01 = hash2(i + vec2(0.0, 1.0), seed);
+    vec2 g11 = hash2(i + vec2(1.0, 1.0), seed);
+
+    float n00 = dot(g00, f - vec2(0.0, 0.0));
+    float n10 = dot(g10, f - vec2(1.0, 0.0));
+    float n01 = dot(g01, f - vec2(0.0, 1.0));
+    float n11 = dot(g11, f - vec2(1.0, 1.0));
+
+    return mix(
+        mix(n00, n10, u.x),
+        mix(n01, n11, u.x),
+        u.y
+    );
+}
+
+float fbm(vec2 p, uint seed, int octaves, float lacunarity, float persistence) {
+    float sum = 0.0;
+    float amp = 1.0;
+    float maxAmp = 0.0;
+    float freq = 1.0;
+
+    for (int i = 0; i < octaves; ++i) {
+        sum += amp * gradientNoise(p * freq, seed + uint(i * 31));
+        maxAmp += amp;
+        freq *= lacunarity;
+        amp *= persistence;
+    }
+
+    return sum / maxAmp;
+}
+
+float evaluatePresetHeight(vec2 worldPos, uint presetType, float baseFreq, float amp, float warpStrength, float mountainPower, uint seed) {
+    if (presetType == 0u) {
+
+        float mFreq = baseFreq * 2.2;
+        vec2 p = worldPos * mFreq;
+
+        vec2 q = vec2(
+            fbm(p * 0.5, seed + 11u, 4, 2.0, 0.5),
+            fbm(p * 0.5 + vec2(5.2, 1.3), seed + 22u, 4, 2.0, 0.5)
+        );
+        vec2 warped = p + warpStrength * q;
+
+        float chain = fbm(warped * 0.35, seed + 33u, 4, 2.0, 0.5);
+        float chainMask = smoothstep(-0.30, 0.35, chain);
+
+        float r1 = 1.0 - abs(gradientNoise(warped * 0.75, seed + 101u));
+        float r2 = 1.0 - abs(gradientNoise(warped * 1.60, seed + 102u));
+        float r3 = 1.0 - abs(gradientNoise(warped * 3.30, seed + 103u));
+        float r4 = 1.0 - abs(gradientNoise(warped * 6.80, seed + 104u));
+        float r5 = gradientNoise(warped * 14.0, seed + 105u) * 0.5 + 0.5;
+
+        float peakStructure = (r1 * 0.50 + r2 * 0.30 + r3 * 0.14 + r4 * 0.06);
+        peakStructure = pow(peakStructure, 2.1) * 2.2;
+
+        float valley = abs(gradientNoise(warped * 0.45 + vec2(2.3, 7.1), seed + 200u));
+        float valleyCarve = smoothstep(0.04, 0.60, valley);
+
+        float lakeBasin = fbm(warped * 0.25, seed + 250u, 3, 2.0, 0.5);
+        float lakeDip = smoothstep(-0.4, 0.2, lakeBasin);
+
+        float h = mix(chain * 0.15 - 0.05, peakStructure * mountainPower * valleyCarve, chainMask * lakeDip);
+        h = h * 0.88 + 0.04;
+
+        return h * amp;
+
+    } else if (presetType == 1u) {
+
+        float hFreq = baseFreq * 4.2;
+        vec2 p = worldPos * hFreq;
+
+        vec2 q = vec2(
+            gradientNoise(p * 0.35, seed + 10u),
+            gradientNoise(p * 0.35 + vec2(4.1, 2.7), seed + 20u)
+        );
+        vec2 warped = p + warpStrength * 0.35 * q;
+
+        float hill1 = sin(warped.x * 0.65) * cos(warped.y * 0.65) * 0.25;
+        float hill2 = (gradientNoise(warped * 0.75, seed + 30u) * 0.5 + 0.5);
+        float hill3 = (gradientNoise(warped * 1.50, seed + 40u) * 0.5 + 0.5) * 0.35;
+        float hill4 = (gradientNoise(warped * 3.00, seed + 50u) * 0.5 + 0.5) * 0.12;
+        float hill5 = gradientNoise(warped * 6.00, seed + 60u) * 0.04;
+
+        float river = abs(gradientNoise(warped * 0.25 + vec2(1.2, 8.4), seed + 70u));
+        float riverCarve = smoothstep(0.02, 0.25, river);
+
+        float rollingMounds = pow(hill2 + hill3 + hill4 + hill1, 1.30) * 0.50 + hill5;
+        float h = (rollingMounds * riverCarve) * 0.85 + 0.08;
+
+        return h * amp;
+
+    } else if (presetType == 2u) {
+
+        float cFreq = baseFreq * 2.8;
+        vec2 p = worldPos * cFreq;
+
+        vec2 q = vec2(
+            fbm(p * 0.55, seed + 15u, 3, 2.0, 0.5),
+            fbm(p * 0.55 + vec2(7.3, 1.9), seed + 25u, 3, 2.0, 0.5)
+        );
+        vec2 warped = p + warpStrength * 0.9 * q;
+
+        float baseMesa = fbm(warped * 0.5, seed + 50u, 4, 2.0, 0.5);
+
+        float numSteps = 8.0;
+        float stepped = floor(baseMesa * numSteps) / numSteps;
+        float frac = fract(baseMesa * numSteps);
+        float terracedMesa = stepped + smoothstep(0.0, 0.28, frac) / numSteps;
+
+        float chasm1 = abs(fbm(warped * 0.70, seed + 70u, 4, 2.0, 0.5));
+        float chasm2 = abs(fbm(warped * 1.35 + vec2(3.1, 5.7), seed + 80u, 3, 2.0, 0.5));
+        float gorge = min(chasm1, chasm2);
+        float gorgeCarve = smoothstep(0.04, 0.35, gorge);
+
+        float buttes = 1.0 - abs(gradientNoise(warped * 1.7, seed + 90u));
+        buttes = pow(buttes, 3.2) * 0.30;
+
+        float h = (terracedMesa * gorgeCarve + buttes) * 0.85 + 0.06;
+        return h * amp;
+
+    } else {
+
+        float iFreq = baseFreq * 2.6;
+        vec2 p = worldPos * iFreq;
+
+        vec2 q = vec2(
+            gradientNoise(p * 0.5, seed + 12u),
+            gradientNoise(p * 0.5 + vec2(3.7, 8.2), seed + 24u)
+        );
+        vec2 warped = p + warpStrength * 0.55 * q;
+
+        float oceanBase = fbm(warped * 0.45, seed + 10u, 4, 2.0, 0.5);
+        float islandPeak = pow(1.0 - abs(gradientNoise(warped * 1.25, seed + 60u)), 2.0);
+        float volcanoCrater = abs(gradientNoise(warped * 2.5, seed + 70u)) * 0.25;
+
+        float islandMask = smoothstep(-0.06, 0.35, oceanBase);
+        float h = mix(-0.25, (islandPeak * 1.3 - volcanoCrater) * 1.25, islandMask);
+
+        return h * amp;
+    }
+}
+
+float evaluateContinuousHeight(vec2 worldPos) {
+    float baseFreq = pc.noiseParams1.x * 0.004;
+    float amp = pc.noiseParams1.y;
+    float warpStrength = pc.noiseParams1.z;
+    float mountainPower = pc.noiseParams1.w;
+    uint seed = pc.config.x;
+    uint presetType = pc.config.z;
+
+    if (presetType < 4u) {
+        return evaluatePresetHeight(worldPos, presetType, baseFreq, amp, warpStrength, mountainPower, seed);
+    }
+
+    vec2 macroP = worldPos * 0.00045;
+
+    float continent = fbm(macroP, seed + 500u, 4, 2.0, 0.5);
+    float moisture  = fbm(macroP + vec2(12.3, 45.6), seed + 600u, 4, 2.0, 0.5);
+
+    float wOcean = smoothstep(0.0, -0.25, continent);
+    float wHighland = smoothstep(-0.05, 0.25, continent);
+    float wHills = 1.0 - max(wOcean, wHighland);
+
+    float wCanyon = wHighland * smoothstep(-0.1, 0.2, moisture);
+    float wMountain = wHighland * (1.0 - smoothstep(-0.1, 0.2, moisture));
+
+    float hMtn = evaluatePresetHeight(worldPos, 0u, baseFreq, amp * 1.10, warpStrength, mountainPower, seed);
+    float hHill = evaluatePresetHeight(worldPos, 1u, baseFreq, amp * 0.40, warpStrength * 0.5, mountainPower * 0.6, seed);
+    float hCanyon = evaluatePresetHeight(worldPos, 2u, baseFreq, amp * 0.85, warpStrength, mountainPower, seed);
+    float hIsland = evaluatePresetHeight(worldPos, 3u, baseFreq, amp * 0.65, warpStrength, mountainPower, seed);
+
+    float totalWeight = wOcean + wHills + wMountain + wCanyon + 0.0001;
+    float blendedH = (hIsland * wOcean + hHill * wHills + hMtn * wMountain + hCanyon * wCanyon) / totalWeight;
+
+    return blendedH;
+}
+
+float evaluateTerrainHeight(vec2 worldPos) {
+    return evaluateContinuousHeight(worldPos);
+}
+
+vec3 calculateNormal(vec2 worldPos, float h) {
+    float eps = pc.chunkOffset.z * 0.5;
+    float hL = evaluateTerrainHeight(worldPos - vec2(eps, 0.0));
+    float hR = evaluateTerrainHeight(worldPos + vec2(eps, 0.0));
+    float hD = evaluateTerrainHeight(worldPos - vec2(0.0, eps));
+    float hU = evaluateTerrainHeight(worldPos + vec2(0.0, eps));
+
+    vec3 normal = normalize(vec3(
+        (hL - hR) / (2.0 * eps),
+        1.0,
+        (hD - hU) / (2.0 * eps)
+    ));
+
+    return normal;
+}
+
+void main() {
+    uvec2 id = gl_GlobalInvocationID.xy;
+    uint gridRes = pc.config.y;
+
+    if (id.x >= gridRes || id.y >= gridRes) {
+        return;
+    }
+
+    float cellSize = pc.chunkOffset.z;
+    vec2 chunkOrigin = pc.chunkOffset.xy;
+
+    vec2 worldPos = chunkOrigin + vec2(float(id.x) * cellSize, float(id.y) * cellSize);
+
+    float height = evaluateTerrainHeight(worldPos);
+    vec3 normal = calculateNormal(worldPos, height);
+
+    uint index = id.y * gridRes + id.x;
+    data[index] = vec4(height, normal.x, normal.y, normal.z);
+}
