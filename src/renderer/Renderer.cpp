@@ -232,30 +232,7 @@ void Renderer::updateUBO(uint32_t frameIndex, const Camera& camera, const Terrai
     float ambientIntensity;
     float dayFactor;
     float starFactor;
-
-    const glm::vec3 noonZenith(0.025f, 0.090f, 0.280f);
-    const glm::vec3 noonHorizon(0.220f, 0.440f, 0.700f);
-    const glm::vec3 noonSun(1.0f, 0.95f, 0.85f);
-    const float noonSunIntensity = 1.35f;
-    const float noonAmbient = 0.55f;
-
-    const glm::vec3 sunsetZenith(0.030f, 0.045f, 0.180f);
-    const glm::vec3 sunsetHorizon(0.850f, 0.320f, 0.080f);
-    const glm::vec3 sunsetSun(1.0f, 0.45f, 0.12f);
-    const float sunsetSunIntensity = 1.45f;
-    const float sunsetAmbient = 0.40f;
-
-    const glm::vec3 duskZenith(0.012f, 0.016f, 0.080f);
-    const glm::vec3 duskHorizon(0.280f, 0.090f, 0.110f);
-    const glm::vec3 duskSun(0.35f, 0.14f, 0.08f);
-    const float duskSunIntensity = 0.35f;
-    const float duskAmbient = 0.25f;
-
-    const glm::vec3 nightZenith(0.002f, 0.004f, 0.012f);
-    const glm::vec3 nightHorizon(0.006f, 0.012f, 0.030f);
-    const glm::vec3 nightMoon(0.22f, 0.32f, 0.48f);
-    const float nightMoonIntensity = 0.38f;
-    const float nightAmbient = 0.15f;
+    using namespace EngineConstants::Environment::SkyColors;
 
     auto smoothstep = [](float edge0, float edge1, float x) {
         float val = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
@@ -263,38 +240,34 @@ void Renderer::updateUBO(uint32_t frameIndex, const Camera& camera, const Terrai
     };
 
     if (sinElev >= 0.15f) {
-
         float f = smoothstep(0.15f, 0.70f, sinElev);
-        skyZenith = glm::mix(sunsetZenith, noonZenith, f);
-        skyHorizon = glm::mix(sunsetHorizon, noonHorizon, f);
-        sunColor = glm::mix(sunsetSun * sunsetSunIntensity, noonSun * noonSunIntensity, f);
-        ambientIntensity = glm::mix(sunsetAmbient, noonAmbient, f);
+        skyZenith = glm::mix(SUNSET_ZENITH, NOON_ZENITH, f);
+        skyHorizon = glm::mix(SUNSET_HORIZON, NOON_HORIZON, f);
+        sunColor = glm::mix(SUNSET_SUN * SUNSET_SUN_INTENSITY, NOON_SUN * NOON_SUN_INTENSITY, f);
+        ambientIntensity = glm::mix(SUNSET_AMBIENT, NOON_AMBIENT, f);
         dayFactor = 1.0f;
         starFactor = 0.0f;
     } else if (sinElev >= 0.0f) {
-
         float f = smoothstep(0.0f, 0.15f, sinElev);
-        skyZenith = glm::mix(duskZenith, sunsetZenith, f);
-        skyHorizon = glm::mix(sunsetHorizon, sunsetHorizon, f);
-        sunColor = glm::mix(duskSun * duskSunIntensity, sunsetSun * sunsetSunIntensity, f);
-        ambientIntensity = glm::mix(duskAmbient, sunsetAmbient, f);
+        skyZenith = glm::mix(DUSK_ZENITH, SUNSET_ZENITH, f);
+        skyHorizon = glm::mix(SUNSET_HORIZON, SUNSET_HORIZON, f);
+        sunColor = glm::mix(DUSK_SUN * DUSK_SUN_INTENSITY, SUNSET_SUN * SUNSET_SUN_INTENSITY, f);
+        ambientIntensity = glm::mix(DUSK_AMBIENT, SUNSET_AMBIENT, f);
         dayFactor = glm::mix(0.35f, 1.0f, f);
         starFactor = 0.0f;
     } else if (sinElev >= -0.18f) {
-
         float f = smoothstep(-0.18f, 0.0f, sinElev);
-        skyZenith = glm::mix(nightZenith, duskZenith, f);
-        skyHorizon = glm::mix(nightHorizon, duskHorizon, f);
-        sunColor = glm::mix(nightMoon * nightMoonIntensity, duskSun * duskSunIntensity, f);
-        ambientIntensity = glm::mix(nightAmbient, duskAmbient, f);
+        skyZenith = glm::mix(NIGHT_ZENITH, DUSK_ZENITH, f);
+        skyHorizon = glm::mix(NIGHT_HORIZON, DUSK_HORIZON, f);
+        sunColor = glm::mix(NIGHT_MOON * NIGHT_MOON_INTENSITY, DUSK_SUN * DUSK_SUN_INTENSITY, f);
+        ambientIntensity = glm::mix(NIGHT_AMBIENT, DUSK_AMBIENT, f);
         dayFactor = glm::mix(0.0f, 0.35f, f);
         starFactor = 1.0f - f;
     } else {
-
-        skyZenith = nightZenith;
-        skyHorizon = nightHorizon;
-        sunColor = nightMoon * nightMoonIntensity;
-        ambientIntensity = nightAmbient;
+        skyZenith = NIGHT_ZENITH;
+        skyHorizon = NIGHT_HORIZON;
+        sunColor = NIGHT_MOON * NIGHT_MOON_INTENSITY;
+        ambientIntensity = NIGHT_AMBIENT;
         dayFactor = 0.0f;
         starFactor = 1.0f;
     }

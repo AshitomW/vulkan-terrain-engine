@@ -6,34 +6,35 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include "core/EngineConstants.hpp"
 
-static constexpr uint32_t CHUNK_GRID_RES = 65;
-static constexpr float CHUNK_SIZE = 128.0f;
-static constexpr float CHUNK_CELL_SIZE = CHUNK_SIZE / static_cast<float>(CHUNK_GRID_RES - 1);
-static constexpr uint32_t NUM_LOD_LEVELS = 4;
+static constexpr uint32_t CHUNK_GRID_RES = EngineConstants::Terrain::GRID_RESOLUTION;
+static constexpr float CHUNK_SIZE = EngineConstants::Terrain::CHUNK_SIZE;
+static constexpr float CHUNK_CELL_SIZE = EngineConstants::Terrain::CELL_SIZE;
+static constexpr uint32_t NUM_LOD_LEVELS = EngineConstants::Terrain::NUM_LOD_LEVELS;
 
 struct TerrainConfig {
-    uint32_t seed = 1337;
+    uint32_t seed = EngineConstants::Terrain::DEFAULT_SEED;
     float frequency = 1.0f;
-    float amplitude = 110.0f;
-    float warpStrength = 0.85f;
-    float mountainPower = 1.8f;
+    float amplitude = EngineConstants::Presets::MOUNTAINS.amplitude;
+    float warpStrength = EngineConstants::Presets::MOUNTAINS.warpStrength;
+    float mountainPower = EngineConstants::Presets::MOUNTAINS.mountainPower;
     float octaves = 6.0f;
     float lacunarity = 2.0f;
     float persistence = 0.45f;
-    float waterHeight = -10.0f;
+    float waterHeight = EngineConstants::Presets::MOUNTAINS.waterHeight;
     float fogDensity = 0.00065f;
     float debugMode = 0.0f;
-    uint32_t presetType = 0;
+    uint32_t presetType = EngineConstants::Presets::MOUNTAINS.type;
     int lodMode = -1;
-    int viewRadius = 3;
+    int viewRadius = EngineConstants::Terrain::DEFAULT_VIEW_RADIUS;
     bool wireframe = false;
     bool showFoliage = true;
-    float foliageDensity = 1.0f;
+    float foliageDensity = EngineConstants::Environment::DEFAULT_FOLIAGE_DENSITY;
 
-    float timeOfDay = 14.5f;
+    float timeOfDay = EngineConstants::Environment::DEFAULT_TIME_OF_DAY;
     bool timeCycleRunning = true;
-    float timeCycleSpeed = 0.20f;
+    float timeCycleSpeed = EngineConstants::Environment::DEFAULT_CYCLE_SPEED;
 
     bool isDynamicLOD() const { return lodMode == -1; }
 
@@ -42,12 +43,12 @@ struct TerrainConfig {
     }
 
     void increaseViewDistance() {
-        viewRadius = std::min(8, viewRadius + 1);
+        viewRadius = std::min(EngineConstants::Terrain::MAX_VIEW_RADIUS, viewRadius + 1);
         updateFog();
     }
 
     void decreaseViewDistance() {
-        viewRadius = std::max(1, viewRadius - 1);
+        viewRadius = std::max(EngineConstants::Terrain::MIN_VIEW_RADIUS, viewRadius - 1);
         updateFog();
     }
 
@@ -64,7 +65,7 @@ struct TerrainConfig {
     }
 
     void increaseFoliageDensity() {
-        foliageDensity = std::min(3.0f, foliageDensity + 0.25f);
+        foliageDensity = std::min(EngineConstants::Environment::MAX_FOLIAGE_DENSITY, foliageDensity + 0.25f);
     }
 
     void decreaseFoliageDensity() {
@@ -115,54 +116,34 @@ struct TerrainConfig {
         }
     }
 
-    void applyMountains() {
-        presetType = 0;
-        amplitude = 115.0f;
-        frequency = 1.0f;
-        warpStrength = 0.85f;
-        mountainPower = 1.8f;
-        waterHeight = -10.0f;
+    void applyPreset(const EngineConstants::Presets::BiomePresetDef& def) {
+        presetType = def.type;
+        amplitude = def.amplitude;
+        frequency = def.frequency;
+        warpStrength = def.warpStrength;
+        mountainPower = def.mountainPower;
+        waterHeight = def.waterHeight;
         updateFog();
+    }
+
+    void applyMountains() {
+        applyPreset(EngineConstants::Presets::MOUNTAINS);
     }
 
     void applyHills() {
-        presetType = 1;
-        amplitude = 38.0f;
-        frequency = 1.0f;
-        warpStrength = 0.40f;
-        mountainPower = 0.50f;
-        waterHeight = -10.0f;
-        updateFog();
+        applyPreset(EngineConstants::Presets::HILLS);
     }
 
     void applyCanyons() {
-        presetType = 2;
-        amplitude = 80.0f;
-        frequency = 1.0f;
-        warpStrength = 1.00f;
-        mountainPower = 1.50f;
-        waterHeight = -10.0f;
-        updateFog();
+        applyPreset(EngineConstants::Presets::CANYONS);
     }
 
     void applyIslands() {
-        presetType = 3;
-        amplitude = 60.0f;
-        frequency = 1.0f;
-        warpStrength = 0.65f;
-        mountainPower = 1.30f;
-        waterHeight = 8.0f;
-        updateFog();
+        applyPreset(EngineConstants::Presets::ISLANDS);
     }
 
     void applyMultiBiome() {
-        presetType = 4;
-        amplitude = 100.0f;
-        frequency = 1.0f;
-        warpStrength = 0.80f;
-        mountainPower = 1.60f;
-        waterHeight = 0.0f;
-        updateFog();
+        applyPreset(EngineConstants::Presets::MULTIBIOME);
     }
 };
 

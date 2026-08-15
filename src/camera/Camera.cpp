@@ -14,14 +14,14 @@ void Camera::updateVectors() {
     front.z = std::sin(glm::radians(m_yaw)) * std::cos(glm::radians(m_pitch));
     m_forward = glm::normalize(front);
 
-    m_right = glm::normalize(glm::cross(m_forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+    m_right = glm::normalize(glm::cross(m_forward, EngineConstants::Camera::WORLD_UP));
     m_up = glm::normalize(glm::cross(m_right, m_forward));
 }
 
 void Camera::update(float deltaTime, GLFWwindow* window) {
     float speed = m_moveSpeed * deltaTime;
     if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
-        speed *= 3.5f;
+        speed *= EngineConstants::Camera::TURBO_MULTIPLIER;
     }
 
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
@@ -37,10 +37,10 @@ void Camera::update(float deltaTime, GLFWwindow* window) {
         m_position += m_right * speed;
     }
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
-        m_position += glm::vec3(0.0f, 1.0f, 0.0f) * speed;
+        m_position += EngineConstants::Camera::WORLD_UP * speed;
     }
     if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
-        m_position -= glm::vec3(0.0f, 1.0f, 0.0f) * speed;
+        m_position -= EngineConstants::Camera::WORLD_UP * speed;
     }
 }
 

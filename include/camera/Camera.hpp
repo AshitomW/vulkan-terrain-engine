@@ -7,10 +7,14 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include "core/EngineConstants.hpp"
 
 class Camera {
 public:
-    Camera(glm::vec3 position = glm::vec3(0.0f, 60.0f, 100.0f), float fov = 45.0f);
+    Camera(
+        glm::vec3 position = EngineConstants::Camera::DEFAULT_POSITION,
+        float fov = EngineConstants::Camera::FOV
+    );
 
     void update(float deltaTime, GLFWwindow* window);
     void onMouseMove(double xpos, double ypos);
@@ -43,19 +47,19 @@ private:
 
 private:
     glm::vec3 m_position;
-    glm::vec3 m_forward{0.0f, -0.3f, -1.0f};
-    glm::vec3 m_up{0.0f, 1.0f, 0.0f};
+    glm::vec3 m_forward{EngineConstants::Camera::DEFAULT_FRONT};
+    glm::vec3 m_up{EngineConstants::Camera::WORLD_UP};
     glm::vec3 m_right{1.0f, 0.0f, 0.0f};
 
     float m_yaw = -90.0f;
     float m_pitch = -20.0f;
-    float m_fov = 45.0f;
+    float m_fov = EngineConstants::Camera::FOV;
     float m_aspect = 16.0f / 9.0f;
-    float m_near = 0.5f;
-    float m_far = 3000.0f;
+    float m_near = EngineConstants::Camera::NEAR_PLANE;
+    float m_far = EngineConstants::Camera::FAR_PLANE;
 
-    float m_moveSpeed = 60.0f;
-    float m_mouseSensitivity = 0.12f;
+    float m_moveSpeed = EngineConstants::Camera::DEFAULT_SPEED;
+    float m_mouseSensitivity = EngineConstants::Camera::MOUSE_SENSITIVITY;
 
     bool m_firstMouse = true;
     double m_lastX = 0.0;

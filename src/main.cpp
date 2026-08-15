@@ -1,9 +1,14 @@
 #include "app/Application.hpp"
+#include "core/EngineConstants.hpp"
 #include <iostream>
 
 int main() {
     try {
-        Application app(1280, 720, "Vulkan Modular Terrain Engine | Real-time Compute Generation & Dynamic LOD");
+        Application app(
+            EngineConstants::Window::DEFAULT_WIDTH,
+            EngineConstants::Window::DEFAULT_HEIGHT,
+            EngineConstants::Window::TITLE
+        );
         app.run();
         return 0;
     } catch (const std::exception& e) {
