@@ -19,8 +19,13 @@ layout(set = 0, binding = 0) uniform GlobalUBO {
     vec4 biomeParams;
 } ubo;
 
-vec3 toneMap(vec3 x) {
-    return (x * (vec3(1.0) + x / 4.0)) / (vec3(1.0) + x);
+vec3 aces_film(vec3 x) {
+    float a = 2.51;
+    float b = 0.03;
+    float c = 2.43;
+    float d = 0.59;
+    float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 void main() {
@@ -28,7 +33,13 @@ void main() {
     vec3 L = normalize(ubo.sunDir.xyz);
     vec3 D = normalize(inWorldPos - ubo.cameraPos.xyz);
 
-    float fogDensity = ubo.terrainParams.y;
+    float dist = length(ubo.cameraPos.xyz - inWorldPos);
+    float maxDist = max(ubo.biomeParams.w, 150.0);
+    float distFactor = clamp(dist / maxDist, 0.0, 1.0);
+
+    if (distFactor >= 0.94) {
+        discard;
+    }
 
     float NdotL = max(dot(N, L), 0.0);
     float wrapLight = pow(clamp(dot(N, L) * 0.35 + 0.65, 0.0, 1.0), 1.8);
@@ -40,19 +51,26 @@ void main() {
 
     vec3 litColor = inColor * (ambient + directLight);
 
-    float dist = length(ubo.cameraPos.xyz - inWorldPos);
-    float fogFactor = 1.0 - exp(-pow(dist * fogDensity, 1.30));
+    float waterHeight = ubo.terrainParams.x;
+    float heightHaze = exp(-max(inWorldPos.y - waterHeight, 0.0) * 0.035) * 0.40;
+    float valleyFog = heightHaze * clamp(dist / (maxDist * 0.4), 0.0, 1.0);
 
-    float elevation = clamp(D.y * 0.60 + 0.40, 0.0, 1.0);
+    float expFog = 1.0 - exp(-pow(distFactor * 2.8, 2.5));
+    float edgeFade = smoothstep(0.60, 0.92, distFactor);
+    float distFog = clamp(max(expFog, edgeFade), 0.0, 1.0);
+    float fogFactor = clamp(distFog + valleyFog, 0.0, 1.0);
+
+    float elevation = clamp(D.y * 0.75 + 0.25, 0.0, 1.0);
     vec3 horizonAtmosphere = mix(ubo.skyColorHorizon.rgb, ubo.skyColorZenith.rgb, elevation);
 
     float sunDot = max(dot(D, L), 0.0);
-    float sunGlare = pow(sunDot, 32.0) * 0.40;
-    vec3 fogColor = horizonAtmosphere + ubo.sunColor.rgb * sunGlare;
+    float mie = (1.0 - 0.76 * 0.76) / pow(1.0 + 0.76 * 0.76 - 2.0 * 0.76 * sunDot, 1.5) * 0.12;
+    float sunGlow = pow(sunDot, 16.0) * 0.45 + mie * 1.2;
+    vec3 fogColor = horizonAtmosphere + ubo.sunColor.rgb * sunGlow * ubo.sunColor.a;
 
-    vec3 finalColor = mix(litColor, fogColor, clamp(fogFactor, 0.0, 1.0));
+    vec3 finalColor = mix(litColor, fogColor, fogFactor);
 
-    finalColor = toneMap(finalColor * 1.15);
+    finalColor = aces_film(finalColor * 1.10);
     finalColor = pow(finalColor, vec3(1.0 / 2.2));
 
     outColor = vec4(finalColor, 1.0);

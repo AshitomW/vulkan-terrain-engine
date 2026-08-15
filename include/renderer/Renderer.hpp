@@ -7,6 +7,7 @@
 #include "renderer/UIOverlay.hpp"
 #include "renderer/FoliageRenderer.hpp"
 #include "renderer/SkyRenderer.hpp"
+#include "renderer/WaterRenderer.hpp"
 #include "camera/Camera.hpp"
 #include "terrain/ChunkManager.hpp"
 #include "terrain/TerrainTypes.hpp"
@@ -60,6 +61,7 @@ private:
     std::unique_ptr<UIOverlay> m_uiOverlay;
     std::unique_ptr<FoliageRenderer> m_foliageRenderer;
     std::unique_ptr<SkyRenderer> m_skyRenderer;
+    std::unique_ptr<WaterRenderer> m_waterRenderer;
 
     VkDescriptorSetLayout m_globalSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_globalDescriptorPool = VK_NULL_HANDLE;

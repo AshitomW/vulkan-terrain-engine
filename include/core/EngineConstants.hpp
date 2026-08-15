@@ -68,6 +68,13 @@ namespace Environment {
     }
 }
 
+namespace Water {
+    inline constexpr float DEFAULT_WAVE_AMPLITUDE = 0.60f;
+    inline constexpr float DEFAULT_WAVE_SPEED = 1.0f;
+    inline constexpr float DEFAULT_WATER_CLARITY = 0.15f;
+    inline constexpr uint32_t WATER_GRID_RES = 160;
+}
+
 namespace Presets {
     struct BiomePresetDef {
         uint32_t type;

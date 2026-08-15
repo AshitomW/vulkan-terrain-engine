@@ -29,6 +29,8 @@ set(SHADERS
     sky.frag
     ui.vert
     ui.frag
+    water.vert
+    water.frag
 )
 set(SPV_OUTPUTS "")
 foreach(SHADER ${SHADERS})

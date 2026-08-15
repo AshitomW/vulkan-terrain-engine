@@ -46,8 +46,15 @@ Real-time procedural terrain rendering engine built with C++17 and Vulkan, featu
   - Biome-specific models including conifer pine trees, deciduous oaks, tropical palms, saguaro cacti, boulders, and grass tufts.
   - Placement rules based on elevation, slope, and water height with root sinking to prevent floating assets on steep hills.
   - Real-time density controls.
+- **Physical Water Mechanics & Ray-Traced Optics**:
+  - Multi-octave Gerstner wave spectrum producing dynamic trochoidal crests, troughs, and lateral surface displacement.
+  - Analytical wave normal derivatives combined with procedural micro-faceting.
+  - Physically based Fresnel reflection and screen-space sky/sun ray reflection.
+  - Optical Beer-Lambert light absorption ($I = I_0 e^{-\sigma \cdot d}$) creating vibrant turquoise shallows and deep navy ocean trenches.
+  - Dynamic procedural shoreline foam and breaking wave crest foam.
+  - Animated sunlight caustics projected onto submerged terrain riverbeds and seabeds.
 - **Diagnostics and Controls**:
-  - On-screen diagnostics overlay showing real-time frame rates, coordinates, chunk counts, and active parameters.
+  - On-screen diagnostics overlay showing real-time frame rates, coordinates, chunk counts, water wave parameters, and active settings.
   - Visualization modes for LOD levels, normal maps, slope steepness, and wireframe mesh rendering.
 
 ---
@@ -64,9 +71,11 @@ Real-time procedural terrain rendering engine built with C++17 and Vulkan, featu
 | **T** | Pause or resume day-night cycle |
 | **[ / ]** | Scrub time backward or forward by 30 minutes |
 | **1 - 5** | Switch presets (1: Mountains, 2: Hills, 3: Canyons, 4: Islands, 5: Multi-Biome) |
+| **G** | Toggle physical water rendering |
+| **B / N** | Decrease or increase wave amplitude |
+| **O / P** | Lower or raise water elevation |
 | **E** | Toggle 3D foliage and scatter rendering |
 | **U / I** | Decrease or increase foliage density |
-| **O / P** | Lower or raise water elevation |
 | **Z / X** | Decrease or increase terrain height amplitude |
 | **C / V** | Decrease or increase terrain noise frequency |
 | **- / =** | Decrease or increase view distance |
@@ -89,6 +98,7 @@ vulkan-terrain/
 │   ├── camera/
 │   │   └── Camera.hpp
 │   ├── core/
+│   │   ├── EngineConstants.hpp
 │   │   ├── VulkanBuffer.hpp
 │   │   ├── VulkanContext.hpp
 │   │   ├── VulkanPipeline.hpp
@@ -97,7 +107,8 @@ vulkan-terrain/
 │   │   ├── FoliageRenderer.hpp
 │   │   ├── Renderer.hpp
 │   │   ├── SkyRenderer.hpp
-│   │   └── UIOverlay.hpp
+│   │   ├── UIOverlay.hpp
+│   │   └── WaterRenderer.hpp
 │   └── terrain/
 │       ├── ChunkManager.hpp
 │       ├── ComputeTerrainGenerator.hpp
@@ -112,7 +123,9 @@ vulkan-terrain/
 │   ├── terrain.frag
 │   ├── terrain.vert
 │   ├── ui.frag
-│   └── ui.vert
+│   ├── ui.vert
+│   ├── water.frag
+│   └── water.vert
 └── src/
     ├── app/
     │   └── Application.cpp
@@ -128,7 +141,8 @@ vulkan-terrain/
     │   ├── FoliageRenderer.cpp
     │   ├── Renderer.cpp
     │   ├── SkyRenderer.cpp
-    │   └── UIOverlay.cpp
+    │   ├── UIOverlay.cpp
+    │   └── WaterRenderer.cpp
     └── terrain/
         ├── ChunkManager.cpp
         ├── ComputeTerrainGenerator.cpp

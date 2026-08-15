@@ -18,11 +18,13 @@ Renderer::Renderer(const VulkanContext& context, GLFWwindow* window, VkDescripto
     m_uiOverlay = std::make_unique<UIOverlay>(context, m_swapchain->getRenderPass());
     m_foliageRenderer = std::make_unique<FoliageRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout);
     m_skyRenderer = std::make_unique<SkyRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout);
+    m_waterRenderer = std::make_unique<WaterRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout);
 }
 
 Renderer::~Renderer() {
     vkDeviceWaitIdle(m_device);
 
+    m_waterRenderer.reset();
     m_skyRenderer.reset();
     m_foliageRenderer.reset();
     m_uiOverlay.reset();
@@ -284,8 +286,9 @@ void Renderer::updateUBO(uint32_t frameIndex, const Camera& camera, const Terrai
     ubo.sunColor = glm::vec4(sunColor, dayFactor);
     ubo.skyColorZenith = glm::vec4(skyZenith, ambientIntensity);
     ubo.skyColorHorizon = glm::vec4(skyHorizon, starFactor);
+    float maxFogDist = static_cast<float>(config.viewRadius) * CHUNK_SIZE * 0.95f;
     ubo.terrainParams = glm::vec4(config.waterHeight, config.fogDensity, time, config.debugMode);
-    ubo.biomeParams = glm::vec4(config.amplitude, static_cast<float>(config.presetType), static_cast<float>(config.seed), 0.0f);
+    ubo.biomeParams = glm::vec4(config.amplitude, static_cast<float>(config.presetType), static_cast<float>(config.seed), maxFogDist);
 
     std::memcpy(m_uboMapped[frameIndex], &ubo, sizeof(GlobalUBO));
 }
@@ -302,8 +305,8 @@ void Renderer::drawHUD(const Camera& camera, const TerrainConfig& config, const 
 
     float panelX = 14.0f;
     float panelY = 14.0f;
-    float panelW = 500.0f;
-    float panelH = 162.0f;
+    float panelW = 520.0f;
+    float panelH = 180.0f;
 
     m_uiOverlay->drawRect(panelX, panelY, panelW, panelH, glm::vec4(0.02f, 0.05f, 0.12f, 0.88f));
     m_uiOverlay->drawRect(panelX, panelY, panelW, 3.0f, glm::vec4(0.20f, 0.65f, 1.0f, 0.95f));
@@ -336,6 +339,11 @@ void Renderer::drawHUD(const Camera& camera, const TerrainConfig& config, const 
     ssConfig << "Seed: " << config.seed << " | Amp: " << config.amplitude << " (Z/X) | Freq: " << config.frequency << " (C/V)";
     m_uiOverlay->drawText(panelX + 14.0f, panelY + 88.0f, 1.0f, ssConfig.str(), glm::vec4(0.95f, 0.95f, 0.95f, 1.0f));
 
+    std::ostringstream ssWater;
+    ssWater << std::fixed << std::setprecision(2);
+    ssWater << "Water: " << (config.showWater ? "ON" : "OFF") << " (Elev: " << static_cast<int>(config.waterHeight) << "m, Waves: " << config.waveAmplitude << "m @ " << config.waveSpeed << "x) [G, B/N, O/P]";
+    m_uiOverlay->drawText(panelX + 14.0f, panelY + 106.0f, 1.0f, ssWater.str(), glm::vec4(0.30f, 0.85f, 1.0f, 1.0f));
+
     const char* modeNames[] = {"Realistic Biomes & Shadows", "LOD Level Colors", "Surface Normals", "Slope Steepness"};
     std::string lodStr;
     if (config.isDynamicLOD()) {
@@ -352,15 +360,15 @@ void Renderer::drawHUD(const Camera& camera, const TerrainConfig& config, const 
 
     std::ostringstream ssModes;
     ssModes << "LOD: " << lodStr << " [L, J/K] | Mode: " << modeNames[static_cast<int>(config.debugMode)] << " [M]";
-    m_uiOverlay->drawText(panelX + 14.0f, panelY + 106.0f, 1.0f, ssModes.str(), glm::vec4(0.50f, 1.0f, 0.65f, 1.0f));
+    m_uiOverlay->drawText(panelX + 14.0f, panelY + 124.0f, 1.0f, ssModes.str(), glm::vec4(0.50f, 1.0f, 0.65f, 1.0f));
 
     std::ostringstream ssFoliage;
     int gridSide = config.viewRadius * 2 + 1;
     ssFoliage << "Foliage: " << (config.showFoliage ? "ON" : "OFF") << " (" << static_cast<int>(config.foliageDensity * 100.0f) << "%) [E, U/I] | View: " << static_cast<int>(config.getViewDistance() * 2.0f) << "m (" << gridSide << "x" << gridSide << ")";
-    m_uiOverlay->drawText(panelX + 14.0f, panelY + 124.0f, 1.0f, ssFoliage.str(), glm::vec4(0.35f, 1.0f, 0.50f, 1.0f));
+    m_uiOverlay->drawText(panelX + 14.0f, panelY + 142.0f, 1.0f, ssFoliage.str(), glm::vec4(0.35f, 1.0f, 0.50f, 1.0f));
 
     float ctrlY = panelY + panelH + 12.0f;
-    float ctrlH = 205.0f;
+    float ctrlH = 220.0f;
 
     m_uiOverlay->drawRect(panelX, ctrlY, panelW, ctrlH, glm::vec4(0.02f, 0.05f, 0.12f, 0.88f));
     m_uiOverlay->drawRect(panelX, ctrlY, panelW, 2.0f, glm::vec4(0.95f, 0.65f, 0.25f, 0.90f));
@@ -371,10 +379,11 @@ void Renderer::drawHUD(const Camera& camera, const TerrainConfig& config, const 
     m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 46.0f, 1.0f, "- [SPACE/E] : Fly Up | [CTRL/Q] : Fly Down", glm::vec4(0.90f, 0.95f, 1.0f, 1.0f));
     m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 62.0f, 1.0f, "- [T] : Pause/Play Day-Night | [ [ / ] ] : Scrub Time", glm::vec4(1.0f, 0.85f, 0.35f, 1.0f));
     m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 78.0f, 1.0f, "- [1-5] : Presets (1:Mtn, 2:Hills, 3:Canyon, 4:Island, 5:Multi-Biome)", glm::vec4(0.90f, 0.95f, 1.0f, 1.0f));
-    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 94.0f, 1.0f, "- [E] : Toggle Foliage | [U / I] : Foliage Density -/+", glm::vec4(0.35f, 1.0f, 0.50f, 1.0f));
-    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 110.0f, 1.0f, "- [O / P] : Water Height -/+ | [Z / X] : Amplitude -/+", glm::vec4(0.40f, 0.90f, 1.0f, 1.0f));
-    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 126.0f, 1.0f, "- [- / =] : View Dist -/+ | [L] : LOD | [J / K] : LOD -/+", glm::vec4(0.90f, 0.95f, 1.0f, 1.0f));
-    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 142.0f, 1.0f, "- [M] : Shading Mode | [F] : Wireframe | [H] : Hide HUD", glm::vec4(0.60f, 0.80f, 1.0f, 1.0f));
+    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 94.0f, 1.0f, "- [G] : Toggle Water | [B / N] : Wave Amp -/+ | [O / P] : Water Elev -/+", glm::vec4(0.30f, 0.85f, 1.0f, 1.0f));
+    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 110.0f, 1.0f, "- [E] : Toggle Foliage | [U / I] : Foliage Density -/+", glm::vec4(0.35f, 1.0f, 0.50f, 1.0f));
+    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 126.0f, 1.0f, "- [Z / X] : Amplitude -/+ | [C / V] : Frequency -/+", glm::vec4(0.90f, 0.95f, 1.0f, 1.0f));
+    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 142.0f, 1.0f, "- [- / =] : View Dist -/+ | [L] : LOD | [J / K] : LOD -/+", glm::vec4(0.90f, 0.95f, 1.0f, 1.0f));
+    m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 158.0f, 1.0f, "- [M] : Shading Mode | [F] : Wireframe | [H] : Hide HUD", glm::vec4(0.60f, 0.80f, 1.0f, 1.0f));
 }
 
 void Renderer::renderFrame(
@@ -504,6 +513,10 @@ void Renderer::renderFrame(
 
     if (config.showFoliage && !config.wireframe) {
         m_foliageRenderer->recordRenderCommands(cmd, m_pipelineLayout, m_globalDescriptorSets[m_currentFrame]);
+    }
+
+    if (config.showWater && !config.wireframe) {
+        m_waterRenderer->recordRenderCommands(cmd, m_globalDescriptorSets[m_currentFrame], config, time, camera.getPosition());
     }
 
     drawHUD(camera, config, hudInfo);

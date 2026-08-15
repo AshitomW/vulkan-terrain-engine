@@ -89,8 +89,8 @@ struct TerrainConfig {
     }
 
     void updateFog() {
-        float visibleDist = static_cast<float>(2 * viewRadius + 1) * CHUNK_SIZE * 0.85f;
-        fogDensity = 1.0f / std::max(100.0f, visibleDist);
+        float visibleDist = static_cast<float>(viewRadius) * CHUNK_SIZE * 0.95f;
+        fogDensity = 1.0f / std::max(50.0f, visibleDist);
     }
 
     void cycleLODMode() {
@@ -145,6 +145,31 @@ struct TerrainConfig {
     void applyMultiBiome() {
         applyPreset(EngineConstants::Presets::MULTIBIOME);
     }
+
+    bool showWater = true;
+    float waveAmplitude = EngineConstants::Water::DEFAULT_WAVE_AMPLITUDE;
+    float waveSpeed = EngineConstants::Water::DEFAULT_WAVE_SPEED;
+    float waterClarity = EngineConstants::Water::DEFAULT_WATER_CLARITY;
+
+    void toggleWater() {
+        showWater = !showWater;
+    }
+
+    void increaseWaveAmplitude() {
+        waveAmplitude = std::min(2.5f, waveAmplitude + 0.15f);
+    }
+
+    void decreaseWaveAmplitude() {
+        waveAmplitude = std::max(0.0f, waveAmplitude - 0.15f);
+    }
+
+    void increaseWaveSpeed() {
+        waveSpeed = std::min(3.0f, waveSpeed + 0.25f);
+    }
+
+    void decreaseWaveSpeed() {
+        waveSpeed = std::max(0.0f, waveSpeed - 0.25f);
+    }
 };
 
 struct GlobalUBO {
@@ -170,4 +195,10 @@ struct ComputePushConstants {
     glm::vec4 noiseParams1;
     glm::vec4 noiseParams2;
     glm::uvec4 config;
+};
+
+struct WaterPushConstants {
+    glm::vec4 waterParams1; // x: waterHeight, y: waveAmplitude, z: waveSpeed, w: time
+    glm::vec4 waterParams2; // x: clarity, y: causticsStrength, z: frequency, w: debugMode
+    glm::vec4 gridCenter;   // x: centerX, y: centerZ, z: gridRadius, w: unused
 };

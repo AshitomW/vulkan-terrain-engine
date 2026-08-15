@@ -182,7 +182,13 @@ void Application::keyCallback(GLFWwindow* window, int key, int  , int action, in
         app->m_config.increaseLOD();
     } else if (key == GLFW_KEY_K || key == GLFW_KEY_UP) {
         app->m_config.decreaseLOD();
-    } else if (key == GLFW_KEY_MINUS || key == GLFW_KEY_COMMA || key == GLFW_KEY_G) {
+    } else if (key == GLFW_KEY_G) {
+        app->m_config.toggleWater();
+    } else if (key == GLFW_KEY_B) {
+        app->m_config.decreaseWaveAmplitude();
+    } else if (key == GLFW_KEY_N) {
+        app->m_config.increaseWaveAmplitude();
+    } else if (key == GLFW_KEY_MINUS || key == GLFW_KEY_COMMA) {
         app->m_config.decreaseViewDistance();
         app->m_chunkManager->setRadius(*app->m_context, app->m_config.viewRadius, app->m_config);
     } else if (key == GLFW_KEY_EQUAL || key == GLFW_KEY_PERIOD) {
