@@ -13,8 +13,12 @@ Real-time procedural terrain rendering engine built with C++17 and Vulkan, featu
 
 
 
+
+
+
+
 <video
-  src="https://github.com/user-attachments/assets/affe8e69-aa08-4c5c-a552-05b8daaeeeac"
+  src="https://github.com/user-attachments/assets/5cdfa1aa-619e-4c56-b038-13edf11fd92b"
   width="100%"
   controls></video>
 
