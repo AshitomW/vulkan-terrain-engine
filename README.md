@@ -1,5 +1,4 @@
 
-https://github.com/user-attachments/assets/22b6291c-3ce8-455c-b2de-66d46a7f6a14
 # vulkan-terrain-engine
 
 Real-time procedural terrain rendering engine built with C++17 and Vulkan, featuring GPU compute generation, dynamic chunk LOD, atmospheric day-night cycles, and procedural foliage scatter.
