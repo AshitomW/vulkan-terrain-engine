@@ -52,11 +52,11 @@ void main() {
     vec3 litColor = inColor * (ambient + directLight);
 
     float waterHeight = ubo.terrainParams.x;
-    float heightHaze = exp(-max(inWorldPos.y - waterHeight, 0.0) * 0.035) * 0.40;
+    float heightHaze = exp(-max(inWorldPos.y - waterHeight, 0.0) * 0.035) * 0.22;
     float valleyFog = heightHaze * clamp(dist / (maxDist * 0.4), 0.0, 1.0);
 
-    float expFog = 1.0 - exp(-pow(distFactor * 2.8, 2.5));
-    float edgeFade = smoothstep(0.60, 0.92, distFactor);
+    float expFog = 1.0 - exp(-pow(distFactor * 1.7, 2.0));
+    float edgeFade = smoothstep(0.70, 0.94, distFactor);
     float distFog = clamp(max(expFog, edgeFade), 0.0, 1.0);
     float fogFactor = clamp(distFog + valleyFog, 0.0, 1.0);
 
@@ -64,8 +64,8 @@ void main() {
     vec3 horizonAtmosphere = mix(ubo.skyColorHorizon.rgb, ubo.skyColorZenith.rgb, elevation);
 
     float sunDot = max(dot(D, L), 0.0);
-    float mie = (1.0 - 0.76 * 0.76) / pow(1.0 + 0.76 * 0.76 - 2.0 * 0.76 * sunDot, 1.5) * 0.12;
-    float sunGlow = pow(sunDot, 16.0) * 0.45 + mie * 1.2;
+    float mie = (1.0 - 0.76 * 0.76) / pow(1.0 + 0.76 * 0.76 - 2.0 * 0.76 * sunDot, 1.5) * 0.07;
+    float sunGlow = pow(sunDot, 16.0) * 0.25 + mie * 0.7;
     vec3 fogColor = horizonAtmosphere + ubo.sunColor.rgb * sunGlow * ubo.sunColor.a;
 
     vec3 finalColor = mix(litColor, fogColor, fogFactor);
