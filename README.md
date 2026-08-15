@@ -1,6 +1,6 @@
-# Vulkan Procedural Terrain Engine
+# vulkan-terrain-engine
 
-A modern 3D terrain rendering engine written in C++17 and Vulkan. The engine uses GPU compute shaders to generate endless procedural landscapes in real time, featuring continuous Level of Detail (LOD), dynamic day-night atmospheric lighting, procedural scatter foliage, and interactive camera controls.
+Real-time procedural terrain rendering engine built with C++17 and Vulkan, featuring GPU compute generation, dynamic chunk LOD, atmospheric day-night cycles, and procedural foliage scatter.
 
 ---
 
