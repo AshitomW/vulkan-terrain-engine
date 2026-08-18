@@ -2,11 +2,12 @@
 
 #include "core/VulkanContext.hpp"
 #include "core/VulkanBuffer.hpp"
-#include "core/VulkanPipeline.hpp"
+#include "core/VulkanImage.hpp"
+#include "core/PipelineBuilder.hpp"
+#include "core/VulkanResource.hpp"
 #include "terrain/TerrainTypes.hpp"
-#include <vector>
-#include <string>
 #include <array>
+#include <string_view>
 
 struct UIVertex {
     glm::vec2 pos;
@@ -20,14 +21,14 @@ public:
     static constexpr size_t MAX_VERTICES = 12000;
 
     UIOverlay(const VulkanContext& context, VkRenderPass renderPass);
-    ~UIOverlay();
+    ~UIOverlay() = default;
 
     UIOverlay(const UIOverlay&) = delete;
     UIOverlay& operator=(const UIOverlay&) = delete;
 
     void begin();
     void drawRect(float x, float y, float w, float h, glm::vec4 color);
-    void drawText(float x, float y, float scale, const std::string& text, glm::vec4 color);
+    void drawText(float x, float y, float scale, std::string_view text, glm::vec4 color);
     void end(uint32_t currentFrame);
 
     void recordCommands(VkCommandBuffer cmd, uint32_t currentFrame, float screenWidth, float screenHeight);
@@ -41,17 +42,15 @@ private:
 private:
     VkDevice m_device = VK_NULL_HANDLE;
 
-    VkImage m_fontImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_fontMemory = VK_NULL_HANDLE;
-    VkImageView m_fontImageView = VK_NULL_HANDLE;
-    VkSampler m_fontSampler = VK_NULL_HANDLE;
+    VulkanImage m_fontImage;
+    vkh::SamplerHandle m_fontSampler;
 
-    VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+    vkh::DescriptorSetLayoutHandle m_descriptorSetLayout;
+    vkh::DescriptorPoolHandle m_descriptorPool;
     VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;
 
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_pipeline = VK_NULL_HANDLE;
+    vkh::PipelineLayoutHandle m_pipelineLayout;
+    vkh::PipelineHandle m_pipeline;
 
     std::array<VulkanBuffer, MAX_FRAMES_IN_FLIGHT> m_vertexBuffers;
     std::array<void*, MAX_FRAMES_IN_FLIGHT> m_vertexMapped{};

@@ -18,7 +18,6 @@ public:
 
     void update(float deltaTime, GLFWwindow* window);
     void onMouseMove(double xpos, double ypos);
-    void onMouseButton(int button, int action, int mods);
     void setAspectRatio(float aspect);
 
     glm::mat4 getViewMatrix() const;

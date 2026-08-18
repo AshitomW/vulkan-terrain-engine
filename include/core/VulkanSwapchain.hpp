@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/VulkanContext.hpp"
+#include "core/VulkanImage.hpp"
+#include "core/VulkanResource.hpp"
 #include <vector>
 
 struct SwapchainSupportDetails {
@@ -20,7 +22,7 @@ public:
     void recreate(const VulkanContext& context, GLFWwindow* window);
 
     VkSwapchainKHR getSwapchain() const { return m_swapchain; }
-    VkRenderPass getRenderPass() const { return m_renderPass; }
+    VkRenderPass getRenderPass() const { return m_renderPass.get(); }
     VkFramebuffer getFramebuffer(size_t index) const { return m_framebuffers[index]; }
     VkExtent2D getExtent() const { return m_extent; }
     VkFormat getImageFormat() const { return m_imageFormat; }
@@ -30,10 +32,10 @@ public:
 
 private:
     void createSwapchain(const VulkanContext& context, GLFWwindow* window);
-    void createImageViews(const VulkanContext& context);
-    void createRenderPass(const VulkanContext& context);
+    void createImageViews();
+    void createRenderPass();
     void createDepthResources(const VulkanContext& context);
-    void createFramebuffers(const VulkanContext& context);
+    void createFramebuffers();
     void cleanup();
 
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
@@ -52,9 +54,6 @@ private:
     std::vector<VkImageView> m_imageViews;
     std::vector<VkFramebuffer> m_framebuffers;
 
-    VkImage m_depthImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_depthImageMemory = VK_NULL_HANDLE;
-    VkImageView m_depthImageView = VK_NULL_HANDLE;
-
-    VkRenderPass m_renderPass = VK_NULL_HANDLE;
+    VulkanImage m_depthImage;
+    vkh::RenderPassHandle m_renderPass;
 };

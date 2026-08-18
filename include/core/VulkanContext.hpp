@@ -3,6 +3,12 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnullability-completeness"
+#pragma GCC diagnostic ignored "-Wunused-private-field"
+#include "core/vk_mem_alloc.h"
+#pragma GCC diagnostic pop
+
 #include <vector>
 #include <string>
 #include <optional>
@@ -46,13 +52,14 @@ public:
     VkQueue getComputeQueue() const { return m_computeQueue; }
     VkQueue getPresentQueue() const { return m_presentQueue; }
     VkCommandPool getCommandPool() const { return m_commandPool; }
+    VmaAllocator getAllocator() const { return m_allocator; }
     const QueueFamilyIndices& getQueueFamilies() const { return m_queueIndices; }
 
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const;
 
     VkCommandBuffer beginSingleTimeCommands() const;
-    void endSingleTimeCommands(VkCommandBuffer commandBuffer) const;
+    void executeSingleTimeCommands(VkCommandBuffer commandBuffer) const;
 
     void waitIdle() const;
 
@@ -62,6 +69,7 @@ private:
     void pickPhysicalDevice();
     void createLogicalDevice();
     void createCommandPool();
+    void createAllocator();
 
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
     bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
@@ -78,5 +86,6 @@ private:
 
     QueueFamilyIndices m_queueIndices;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
+    VmaAllocator m_allocator = VK_NULL_HANDLE;
     bool m_portabilitySubsetSupported = false;
 };

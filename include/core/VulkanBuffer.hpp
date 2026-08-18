@@ -24,14 +24,13 @@ public:
     static void copyBuffer(const VulkanContext& context, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
     VkBuffer getBuffer() const { return m_buffer; }
-    VkDeviceMemory getMemory() const { return m_memory; }
     VkDeviceSize getSize() const { return m_size; }
     bool isValid() const { return m_buffer != VK_NULL_HANDLE; }
 
 private:
-    VkDevice m_device = VK_NULL_HANDLE;
     VkBuffer m_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory m_memory = VK_NULL_HANDLE;
+    VmaAllocation m_allocation = VK_NULL_HANDLE;
+    VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkDeviceSize m_size = 0;
     void* m_mapped = nullptr;
 };

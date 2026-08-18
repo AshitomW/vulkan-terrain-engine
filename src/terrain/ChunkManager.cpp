@@ -1,51 +1,19 @@
 #include "terrain/ChunkManager.hpp"
 #include <cmath>
-#include <iostream>
 
 ChunkManager::ChunkManager(const VulkanContext& context, int radius)
     : m_device(context.getDevice()), m_radius(radius) {
-    createDescriptorResources(context);
+    createDescriptorResources();
     createLODIndexBuffers(context);
 
-    m_generator = std::make_unique<ComputeTerrainGenerator>(context, m_ssboSetLayout);
+    m_generator = std::make_unique<ComputeTerrainGenerator>(context, m_ssboSetLayout.get());
 
-    int totalChunks = (2 * m_radius + 1) * (2 * m_radius + 1);
-    m_chunks.reserve(totalChunks);
-
-    for (int dz = -m_radius; dz <= m_radius; ++dz) {
-        for (int dx = -m_radius; dx <= m_radius; ++dx) {
-            m_chunks.push_back(std::make_unique<TerrainChunk>(
-                context,
-                dx,
-                dz,
-                m_descriptorPool,
-                m_ssboSetLayout
-            ));
-        }
-    }
+    rebuildChunks(context);
 }
 
-ChunkManager::~ChunkManager() {
-    m_chunks.clear();
-    m_generator.reset();
+ChunkManager::~ChunkManager() = default;
 
-    for (size_t i = 0; i < NUM_LOD_LEVELS; ++i) {
-        m_lodIndexBuffers[i].destroy();
-    }
-
-    if (m_descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
-        m_descriptorPool = VK_NULL_HANDLE;
-    }
-
-    if (m_ssboSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_ssboSetLayout, nullptr);
-        m_ssboSetLayout = VK_NULL_HANDLE;
-    }
-}
-
-void ChunkManager::createDescriptorResources(const VulkanContext& context) {
-
+void ChunkManager::createDescriptorResources() {
     VkDescriptorSetLayoutBinding ssboBinding{};
     ssboBinding.binding = 0;
     ssboBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -57,7 +25,12 @@ void ChunkManager::createDescriptorResources(const VulkanContext& context) {
     layoutInfo.bindingCount = 1;
     layoutInfo.pBindings = &ssboBinding;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_ssboSetLayout), "Failed to create SSBO set layout");
+    VkDescriptorSetLayout setLayout;
+    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &setLayout), "Failed to create SSBO set layout");
+    m_ssboSetLayout = vkh::DescriptorSetLayoutHandle(
+        setLayout,
+        [device = m_device](VkDescriptorSetLayout l) { vkDestroyDescriptorSetLayout(device, l, nullptr); }
+    );
 
     uint32_t maxPossibleChunks = 512;
     VkDescriptorPoolSize poolSize{};
@@ -71,7 +44,12 @@ void ChunkManager::createDescriptorResources(const VulkanContext& context) {
     poolInfo.pPoolSizes = &poolSize;
     poolInfo.maxSets = maxPossibleChunks;
 
-    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool), "Failed to create chunk descriptor pool");
+    VkDescriptorPool pool;
+    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &pool), "Failed to create chunk descriptor pool");
+    m_descriptorPool = vkh::DescriptorPoolHandle(
+        pool,
+        [device = m_device](VkDescriptorPool p) { vkDestroyDescriptorPool(device, p, nullptr); }
+    );
 }
 
 void ChunkManager::createLODIndexBuffers(const VulkanContext& context) {
@@ -121,34 +99,47 @@ void ChunkManager::createLODIndexBuffers(const VulkanContext& context) {
     }
 }
 
+void ChunkManager::rebuildChunks(const VulkanContext& context) {
+    m_chunks.clear();
+    m_chunks.reserve((2 * m_radius + 1) * (2 * m_radius + 1));
+
+    for (int dz = -m_radius; dz <= m_radius; ++dz) {
+        for (int dx = -m_radius; dx <= m_radius; ++dx) {
+            m_chunks.emplace_back(
+                context,
+                m_centerChunkX + dx,
+                m_centerChunkZ + dz,
+                m_descriptorPool.get(),
+                m_ssboSetLayout.get()
+            );
+        }
+    }
+
+    refreshChunkOrigins();
+}
+
+void ChunkManager::refreshChunkOrigins() {
+    m_chunkOrigins.clear();
+    m_chunkOrigins.reserve(m_chunks.size());
+    for (const auto& chunk : m_chunks) {
+        m_chunkOrigins.push_back(chunk.getWorldPos());
+    }
+}
+
 void ChunkManager::setRadius(const VulkanContext& context, int newRadius, const TerrainConfig& config) {
     if (newRadius < 1) newRadius = 1;
     if (newRadius > 8) newRadius = 8;
     if (m_radius == newRadius && !m_chunks.empty()) return;
 
     m_radius = newRadius;
+
     m_chunks.clear();
 
-    if (m_descriptorPool != VK_NULL_HANDLE) {
-        vkResetDescriptorPool(m_device, m_descriptorPool, 0);
+    if (m_descriptorPool) {
+        vkResetDescriptorPool(m_device, m_descriptorPool.get(), 0);
     }
 
-    int totalChunks = (2 * m_radius + 1) * (2 * m_radius + 1);
-    m_chunks.reserve(totalChunks);
-
-    for (int dz = -m_radius; dz <= m_radius; ++dz) {
-        for (int dx = -m_radius; dx <= m_radius; ++dx) {
-            int targetX = m_centerChunkX + dx;
-            int targetZ = m_centerChunkZ + dz;
-            m_chunks.push_back(std::make_unique<TerrainChunk>(
-                context,
-                targetX,
-                targetZ,
-                m_descriptorPool,
-                m_ssboSetLayout
-            ));
-        }
-    }
+    rebuildChunks(context);
 
     regenerateAll(context, config);
 }
@@ -161,82 +152,92 @@ void ChunkManager::update(const VulkanContext& context, const glm::vec3& cameraP
     m_centerChunkX = targetCenterX;
     m_centerChunkZ = targetCenterZ;
 
-    std::vector<TerrainChunk*> dirtyChunks;
-
     if (centerShifted) {
         size_t idx = 0;
         for (int dz = -m_radius; dz <= m_radius; ++dz) {
             for (int dx = -m_radius; dx <= m_radius; ++dx) {
-                int targetX = m_centerChunkX + dx;
-                int targetZ = m_centerChunkZ + dz;
-                m_chunks[idx]->setCoord(targetX, targetZ);
+                m_chunks[idx].setCoord(m_centerChunkX + dx, m_centerChunkZ + dz);
                 idx++;
             }
         }
+        refreshChunkOrigins();
     }
 
+    m_dirtyChunks.clear();
     for (auto& chunk : m_chunks) {
-        chunk->updateLOD(cameraPos, config.lodMode);
-        if (chunk->needsRegeneration()) {
-            dirtyChunks.push_back(chunk.get());
+        chunk.updateLOD(cameraPos, config.lodMode);
+        if (chunk.needsRegeneration()) {
+            m_dirtyChunks.push_back(&chunk);
         }
     }
 
-    if (!dirtyChunks.empty()) {
-        m_generator->generateChunks(context, dirtyChunks, config);
+    if (!m_dirtyChunks.empty()) {
+        m_generator->generateChunks(context, m_dirtyChunks, config);
     }
 }
 
 void ChunkManager::regenerateAll(const VulkanContext& context, const TerrainConfig& config) {
-    std::vector<TerrainChunk*> allChunks;
-    allChunks.reserve(m_chunks.size());
+    m_dirtyChunks.clear();
+    m_dirtyChunks.reserve(m_chunks.size());
     for (auto& chunk : m_chunks) {
-        chunk->markDirty();
-        allChunks.push_back(chunk.get());
+        chunk.markDirty();
+        m_dirtyChunks.push_back(&chunk);
     }
-    m_generator->generateChunks(context, allChunks, config);
+    m_generator->generateChunks(context, m_dirtyChunks, config);
 }
 
-void ChunkManager::recordRenderCommands(VkCommandBuffer commandBuffer, VkPipelineLayout graphicsPipelineLayout) {
-    for (const auto& chunk : m_chunks) {
-        uint32_t lod = chunk->getLOD();
-        VkDescriptorSet ssboSet = chunk->getDescriptorSet();
+void ChunkManager::recordRenderCommands(VkCommandBuffer commandBuffer, VkPipelineLayout graphicsPipelineLayout,
+                                        const Frustum& frustum, const TerrainConfig& config) {
+    float minY = -0.5f * config.amplitude;
+    float maxY = 1.5f * config.amplitude;
 
-        vkCmdBindDescriptorSets(
-            commandBuffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            graphicsPipelineLayout,
-            1,
-            1,
-            &ssboSet,
-            0,
-            nullptr
-        );
-
+    for (uint32_t lod = 0; lod < NUM_LOD_LEVELS; ++lod) {
         VkBuffer indexBuffer = m_lodIndexBuffers[lod].getBuffer();
         vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         uint32_t lodGridRes = getLODGridRes(lod);
         uint32_t lodStep = getLODStep(lod);
 
-        ChunkPushConstants pc{};
-        pc.chunkOffset = glm::vec4(
-            chunk->getWorldPos().x,
-            chunk->getWorldPos().y,
-            CHUNK_CELL_SIZE,
-            static_cast<float>(CHUNK_GRID_RES)
-        );
-        pc.lodParams = glm::uvec4(lodGridRes, lodStep, lod, 0);
+        for (const auto& chunk : m_chunks) {
+            if (chunk.getLOD() != lod) continue;
 
-        vkCmdPushConstants(
-            commandBuffer,
-            graphicsPipelineLayout,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            0,
-            sizeof(ChunkPushConstants),
-            &pc
-        );
+            glm::vec2 wp = chunk.getWorldPos();
+            glm::vec3 min(wp.x, minY, wp.y);
+            glm::vec3 max(wp.x + CHUNK_SIZE, maxY, wp.y + CHUNK_SIZE);
+            if (!frustum.intersectsAABB(min, max)) continue;
 
-        vkCmdDrawIndexed(commandBuffer, m_lodIndexCounts[lod], 1, 0, 0, 0);
+            VkDescriptorSet ssboSet = chunk.getDescriptorSet();
+
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                graphicsPipelineLayout,
+                1,
+                1,
+                &ssboSet,
+                0,
+                nullptr
+            );
+
+            ChunkPushConstants pc{};
+            pc.chunkOffset = glm::vec4(
+                wp.x,
+                wp.y,
+                CHUNK_CELL_SIZE,
+                static_cast<float>(CHUNK_GRID_RES)
+            );
+            pc.lodParams = glm::uvec4(lodGridRes, lodStep, lod, 0);
+
+            vkCmdPushConstants(
+                commandBuffer,
+                graphicsPipelineLayout,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                0,
+                sizeof(ChunkPushConstants),
+                &pc
+            );
+
+            vkCmdDrawIndexed(commandBuffer, m_lodIndexCounts[lod], 1, 0, 0, 0);
+        }
     }
 }

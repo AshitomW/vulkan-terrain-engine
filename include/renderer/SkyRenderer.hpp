@@ -1,7 +1,9 @@
 #pragma once
 
 #include "core/VulkanContext.hpp"
-#include "core/VulkanPipeline.hpp"
+#include "core/PipelineBuilder.hpp"
+#include "core/VulkanResource.hpp"
+#include "renderer/FrameContext.hpp"
 
 class SkyRenderer {
 public:
@@ -11,16 +13,13 @@ public:
     SkyRenderer(const SkyRenderer&) = delete;
     SkyRenderer& operator=(const SkyRenderer&) = delete;
 
-    void recordRenderCommands(
-        VkCommandBuffer commandBuffer,
-        VkDescriptorSet uboDescriptorSet
-    );
+    void recordRenderCommands(const FrameContext& frame);
 
 private:
     void createPipeline(const VulkanContext& context, VkRenderPass renderPass, VkDescriptorSetLayout uboSetLayout);
 
 private:
     VkDevice m_device = VK_NULL_HANDLE;
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_pipeline = VK_NULL_HANDLE;
+    vkh::PipelineHandle m_pipeline;
+    vkh::PipelineLayoutHandle m_pipelineLayout;
 };

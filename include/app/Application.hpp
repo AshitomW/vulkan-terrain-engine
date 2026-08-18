@@ -20,7 +20,6 @@ public:
 
 private:
     void initWindow();
-    void printHelp();
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
     static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);

@@ -52,6 +52,9 @@ target_include_directories(terrain PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${GLM_INCLUDE_DIR}
 )
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(terrain PRIVATE -Wall -Wextra)
+endif()
 target_link_libraries(terrain PRIVATE
     Vulkan::Vulkan
     glfw

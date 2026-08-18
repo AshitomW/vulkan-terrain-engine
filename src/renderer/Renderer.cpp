@@ -16,48 +16,13 @@ Renderer::Renderer(const VulkanContext& context, GLFWwindow* window, VkDescripto
     createSyncObjects();
 
     m_uiOverlay = std::make_unique<UIOverlay>(context, m_swapchain->getRenderPass());
-    m_foliageRenderer = std::make_unique<FoliageRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout);
-    m_skyRenderer = std::make_unique<SkyRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout);
-    m_waterRenderer = std::make_unique<WaterRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout);
+    m_foliageRenderer = std::make_unique<FoliageRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout.get());
+    m_skyRenderer = std::make_unique<SkyRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout.get());
+    m_waterRenderer = std::make_unique<WaterRenderer>(context, m_swapchain->getRenderPass(), m_globalSetLayout.get());
 }
 
 Renderer::~Renderer() {
     vkDeviceWaitIdle(m_device);
-
-    m_waterRenderer.reset();
-    m_skyRenderer.reset();
-    m_foliageRenderer.reset();
-    m_uiOverlay.reset();
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        vkDestroySemaphore(m_device, m_imageAvailableSemaphores[i], nullptr);
-        vkDestroySemaphore(m_device, m_renderFinishedSemaphores[i], nullptr);
-        vkDestroyFence(m_device, m_inFlightFences[i], nullptr);
-
-        if (m_uboMapped[i]) {
-            m_uboBuffers[i].unmap();
-        }
-        m_uboBuffers[i].destroy();
-    }
-
-    if (m_solidPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device, m_solidPipeline, nullptr);
-    }
-    if (m_wireframePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device, m_wireframePipeline, nullptr);
-    }
-    if (m_pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-    }
-
-    if (m_globalDescriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(m_device, m_globalDescriptorPool, nullptr);
-    }
-    if (m_globalSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_globalSetLayout, nullptr);
-    }
-
-    m_swapchain.reset();
 }
 
 void Renderer::createGlobalDescriptorSetLayout() {
@@ -72,7 +37,12 @@ void Renderer::createGlobalDescriptorSetLayout() {
     layoutInfo.bindingCount = 1;
     layoutInfo.pBindings = &uboBinding;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_globalSetLayout), "Failed to create global UBO set layout");
+    VkDescriptorSetLayout setLayout;
+    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &setLayout), "Failed to create global UBO set layout");
+    m_globalSetLayout = vkh::DescriptorSetLayoutHandle(
+        setLayout,
+        [device = m_device](VkDescriptorSetLayout l) { vkDestroyDescriptorSetLayout(device, l, nullptr); }
+    );
 }
 
 void Renderer::createGlobalDescriptorResources() {
@@ -86,12 +56,17 @@ void Renderer::createGlobalDescriptorResources() {
     poolInfo.pPoolSizes = &poolSize;
     poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
-    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_globalDescriptorPool), "Failed to create global descriptor pool");
+    VkDescriptorPool pool;
+    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &pool), "Failed to create global descriptor pool");
+    m_globalDescriptorPool = vkh::DescriptorPoolHandle(
+        pool,
+        [device = m_device](VkDescriptorPool p) { vkDestroyDescriptorPool(device, p, nullptr); }
+    );
 
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_globalSetLayout);
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_globalSetLayout.get());
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_globalDescriptorPool;
+    allocInfo.descriptorPool = pool;
     allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
     allocInfo.pSetLayouts = layouts.data();
 
@@ -128,7 +103,7 @@ void Renderer::createGlobalDescriptorResources() {
 
 void Renderer::createPipelines(VkDescriptorSetLayout chunkSSBOSetLayout) {
     std::array<VkDescriptorSetLayout, 2> setLayouts = {
-        m_globalSetLayout,
+        m_globalSetLayout.get(),
         chunkSSBOSetLayout
     };
 
@@ -144,34 +119,36 @@ void Renderer::createPipelines(VkDescriptorSetLayout chunkSSBOSetLayout) {
     layoutInfo.pushConstantRangeCount = 1;
     layoutInfo.pPushConstantRanges = &pushConstantRange;
 
-    VK_CHECK(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout), "Failed to create pipeline layout");
+    VkPipelineLayout layout;
+    VK_CHECK(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &layout), "Failed to create pipeline layout");
+    m_pipelineLayout = vkh::PipelineLayoutHandle(
+        layout,
+        [device = m_device](VkPipelineLayout l) { vkDestroyPipelineLayout(device, l, nullptr); }
+    );
 
-    VkShaderModule vertShader = VulkanPipeline::createShaderModule(m_device, "shaders/terrain.vert.spv");
-    VkShaderModule fragShader = VulkanPipeline::createShaderModule(m_device, "shaders/terrain.frag.spv");
+    VkShaderModule vertShader = PipelineBuilder::createShaderModule(m_device, "shaders/terrain.vert.spv");
+    VkShaderModule fragShader = PipelineBuilder::createShaderModule(m_device, "shaders/terrain.frag.spv");
 
-    VulkanPipeline::createTerrainGraphicsPipeline(
-        m_device,
-        m_swapchain->getRenderPass(),
-        m_pipelineLayout,
-        vertShader,
-        fragShader,
-        false,
-        m_solidPipeline
+    PipelineBuilder builder;
+    builder.setVertexShader(vertShader)
+        .setFragmentShader(fragShader)
+        .setDepthState(true, true, VK_COMPARE_OP_LESS_OR_EQUAL)
+        .setPipelineLayout(layout)
+        .setRenderPass(m_swapchain->getRenderPass());
+
+    m_solidPipeline = vkh::PipelineHandle(
+        builder.build(m_device),
+        [device = m_device](VkPipeline p) { vkDestroyPipeline(device, p, nullptr); }
     );
 
     try {
-        VulkanPipeline::createTerrainGraphicsPipeline(
-            m_device,
-            m_swapchain->getRenderPass(),
-            m_pipelineLayout,
-            vertShader,
-            fragShader,
-            true,
-            m_wireframePipeline
+        m_wireframePipeline = vkh::PipelineHandle(
+            builder.setPolygonMode(VK_POLYGON_MODE_LINE).build(m_device),
+            [device = m_device](VkPipeline p) { vkDestroyPipeline(device, p, nullptr); }
         );
     } catch (const std::exception& e) {
         std::cerr << "Wireframe mode not supported: " << e.what() << std::endl;
-        m_wireframePipeline = VK_NULL_HANDLE;
+        m_wireframePipeline = vkh::PipelineHandle();
     }
 
     vkDestroyShaderModule(m_device, vertShader, nullptr);
@@ -197,13 +174,29 @@ void Renderer::createSyncObjects() {
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]), "Failed to create semaphore");
-        VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]), "Failed to create semaphore");
-        VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]), "Failed to create fence");
+        VkSemaphore semaphore;
+        VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &semaphore), "Failed to create semaphore");
+        m_imageAvailableSemaphores[i] = vkh::SemaphoreHandle(
+            semaphore,
+            [device = m_device](VkSemaphore s) { vkDestroySemaphore(device, s, nullptr); }
+        );
+
+        VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &semaphore), "Failed to create semaphore");
+        m_renderFinishedSemaphores[i] = vkh::SemaphoreHandle(
+            semaphore,
+            [device = m_device](VkSemaphore s) { vkDestroySemaphore(device, s, nullptr); }
+        );
+
+        VkFence fence;
+        VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &fence), "Failed to create fence");
+        m_inFlightFences[i] = vkh::FenceHandle(
+            fence,
+            [device = m_device](VkFence f) { vkDestroyFence(device, f, nullptr); }
+        );
     }
 }
 
-void Renderer::onWindowResize(GLFWwindow*  ) {
+void Renderer::onWindowResize(GLFWwindow*) {
     m_framebufferResized = true;
 }
 
@@ -220,72 +213,12 @@ void Renderer::updateUBO(uint32_t frameIndex, const Camera& camera, const Terrai
     ubo.proj = camera.getProjMatrix();
     ubo.cameraPos = glm::vec4(camera.getPosition(), 1.0f);
 
-    float t = config.timeOfDay;
-    float sunAngle = ((t - 6.0f) / 12.0f) * 3.141592653589793f;
-    float sinElev = std::sin(sunAngle);
-    float cosElev = std::cos(sunAngle);
+    Atmosphere::State sky = Atmosphere::compute(config.timeOfDay);
 
-    glm::vec3 sunDir = glm::normalize(glm::vec3(cosElev * 0.80f, sinElev, 0.35f));
-    glm::vec3 moonDir = glm::normalize(glm::vec3(-cosElev * 0.80f, -sinElev, -0.35f));
-
-    glm::vec3 skyZenith;
-    glm::vec3 skyHorizon;
-    glm::vec3 sunColor;
-    float ambientIntensity;
-    float dayFactor;
-    float starFactor;
-    using namespace EngineConstants::Environment::SkyColors;
-
-    auto smoothstep = [](float edge0, float edge1, float x) {
-        float val = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
-        return val * val * (3.0f - 2.0f * val);
-    };
-
-    if (sinElev >= 0.15f) {
-        float f = smoothstep(0.15f, 0.70f, sinElev);
-        skyZenith = glm::mix(SUNSET_ZENITH, NOON_ZENITH, f);
-        skyHorizon = glm::mix(SUNSET_HORIZON, NOON_HORIZON, f);
-        sunColor = glm::mix(SUNSET_SUN * SUNSET_SUN_INTENSITY, NOON_SUN * NOON_SUN_INTENSITY, f);
-        ambientIntensity = glm::mix(SUNSET_AMBIENT, NOON_AMBIENT, f);
-        dayFactor = 1.0f;
-        starFactor = 0.0f;
-    } else if (sinElev >= 0.0f) {
-        float f = smoothstep(0.0f, 0.15f, sinElev);
-        skyZenith = glm::mix(DUSK_ZENITH, SUNSET_ZENITH, f);
-        skyHorizon = glm::mix(SUNSET_HORIZON, SUNSET_HORIZON, f);
-        sunColor = glm::mix(DUSK_SUN * DUSK_SUN_INTENSITY, SUNSET_SUN * SUNSET_SUN_INTENSITY, f);
-        ambientIntensity = glm::mix(DUSK_AMBIENT, SUNSET_AMBIENT, f);
-        dayFactor = glm::mix(0.35f, 1.0f, f);
-        starFactor = 0.0f;
-    } else if (sinElev >= -0.18f) {
-        float f = smoothstep(-0.18f, 0.0f, sinElev);
-        skyZenith = glm::mix(NIGHT_ZENITH, DUSK_ZENITH, f);
-        skyHorizon = glm::mix(NIGHT_HORIZON, DUSK_HORIZON, f);
-        sunColor = glm::mix(NIGHT_MOON * NIGHT_MOON_INTENSITY, DUSK_SUN * DUSK_SUN_INTENSITY, f);
-        ambientIntensity = glm::mix(NIGHT_AMBIENT, DUSK_AMBIENT, f);
-        dayFactor = glm::mix(0.0f, 0.35f, f);
-        starFactor = 1.0f - f;
-    } else {
-        skyZenith = NIGHT_ZENITH;
-        skyHorizon = NIGHT_HORIZON;
-        sunColor = NIGHT_MOON * NIGHT_MOON_INTENSITY;
-        ambientIntensity = NIGHT_AMBIENT;
-        dayFactor = 0.0f;
-        starFactor = 1.0f;
-    }
-
-    glm::vec3 activeLightDir;
-    if (sinElev >= -0.05f) {
-        float blend = smoothstep(-0.05f, 0.10f, sinElev);
-        activeLightDir = glm::normalize(glm::mix(moonDir, sunDir, blend));
-    } else {
-        activeLightDir = moonDir;
-    }
-
-    ubo.sunDir = glm::vec4(activeLightDir, sinElev);
-    ubo.sunColor = glm::vec4(sunColor, dayFactor);
-    ubo.skyColorZenith = glm::vec4(skyZenith, ambientIntensity);
-    ubo.skyColorHorizon = glm::vec4(skyHorizon, starFactor);
+    ubo.sunDir = glm::vec4(sky.activeLightDir, sky.sinElevation);
+    ubo.sunColor = glm::vec4(sky.sunColor, sky.dayFactor);
+    ubo.skyColorZenith = glm::vec4(sky.skyZenith, sky.ambientIntensity);
+    ubo.skyColorHorizon = glm::vec4(sky.skyHorizon, sky.starFactor);
     float maxFogDist = static_cast<float>(config.viewRadius) * CHUNK_SIZE * 0.95f;
     ubo.terrainParams = glm::vec4(config.waterHeight, config.fogDensity, time, config.debugMode);
     ubo.biomeParams = glm::vec4(config.amplitude, static_cast<float>(config.presetType), static_cast<float>(config.seed), maxFogDist);
@@ -386,22 +319,15 @@ void Renderer::drawHUD(const Camera& camera, const TerrainConfig& config, const 
     m_uiOverlay->drawText(panelX + 14.0f, ctrlY + 158.0f, 1.0f, "- [M] : Shading Mode | [F] : Wireframe | [H] : Hide HUD", glm::vec4(0.60f, 0.80f, 1.0f, 1.0f));
 }
 
-void Renderer::renderFrame(
-    GLFWwindow* window,
-    const Camera& camera,
-    ChunkManager& chunkManager,
-    const TerrainConfig& config,
-    const HUDInfo& hudInfo,
-    float time
-) {
-    vkWaitForFences(m_device, 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
+bool Renderer::beginFrame(GLFWwindow* window, uint32_t& imageIndex) {
+    VkFence fence = m_inFlightFences[m_currentFrame].get();
+    vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX);
 
-    uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(
         m_device,
         m_swapchain->getSwapchain(),
         UINT64_MAX,
-        m_imageAvailableSemaphores[m_currentFrame],
+        m_imageAvailableSemaphores[m_currentFrame].get(),
         VK_NULL_HANDLE,
         &imageIndex
     );
@@ -409,34 +335,12 @@ void Renderer::renderFrame(
     if (result == VK_ERROR_OUT_OF_DATE_KHR || m_framebufferResized) {
         m_framebufferResized = false;
         m_swapchain->recreate(m_context, window);
-        return;
+        return false;
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("Failed to acquire swapchain image!");
     }
 
-    vkResetFences(m_device, 1, &m_inFlightFences[m_currentFrame]);
-
-    updateUBO(m_currentFrame, camera, config, time);
-
-    if (config.seed != m_lastFoliageSeed ||
-        chunkManager.getCenterChunkX() != m_lastCenterChunkX ||
-        chunkManager.getCenterChunkZ() != m_lastCenterChunkZ ||
-        chunkManager.getRadius() != m_lastRadius ||
-        config.showFoliage != m_lastShowFoliage ||
-        config.presetType != m_lastPresetType ||
-        config.waterHeight != m_lastWaterHeight ||
-        config.foliageDensity != m_lastFoliageDensity) {
-        m_lastFoliageSeed = config.seed;
-        m_lastCenterChunkX = chunkManager.getCenterChunkX();
-        m_lastCenterChunkZ = chunkManager.getCenterChunkZ();
-        m_lastRadius = chunkManager.getRadius();
-        m_lastShowFoliage = config.showFoliage;
-        m_lastPresetType = config.presetType;
-        m_lastWaterHeight = config.waterHeight;
-        m_lastFoliageDensity = config.foliageDensity;
-
-        m_foliageRenderer->updateInstances(m_context, chunkManager.getChunkOrigins(), config);
-    }
+    vkResetFences(m_device, 1, &fence);
 
     VkCommandBuffer cmd = m_commandBuffers[m_currentFrame];
     vkResetCommandBuffer(cmd, 0);
@@ -445,27 +349,19 @@ void Renderer::renderFrame(
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin command buffer recording");
 
-    float t = config.timeOfDay;
-    float sunAngle = ((t - 6.0f) / 12.0f) * 3.141592653589793f;
-    float sinElev = std::sin(sunAngle);
+    return true;
+}
 
-    VkClearColorValue skyClear;
-    if (sinElev > 0.15f) {
-        skyClear = {{0.025f, 0.090f, 0.280f, 1.0f}};
-    } else if (sinElev > -0.15f) {
-        float f = (sinElev + 0.15f) / 0.30f;
-        skyClear = {{
-            0.002f * (1.0f - f) + 0.025f * f,
-            0.004f * (1.0f - f) + 0.090f * f,
-            0.012f * (1.0f - f) + 0.280f * f,
-            1.0f
-        }};
-    } else {
-        skyClear = {{0.002f, 0.004f, 0.012f, 1.0f}};
-    }
+void Renderer::recordPass(VkCommandBuffer cmd, uint32_t imageIndex, const Camera& camera,
+                          ChunkManager& chunkManager, const TerrainConfig& config,
+                          const HUDInfo& hudInfo, float time) {
+    Atmosphere::State sky = Atmosphere::compute(config.timeOfDay);
 
     std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = skyClear;
+    clearValues[0].color.float32[0] = sky.skyClearColor.r;
+    clearValues[0].color.float32[1] = sky.skyClearColor.g;
+    clearValues[0].color.float32[2] = sky.skyClearColor.b;
+    clearValues[0].color.float32[3] = sky.skyClearColor.a;
     clearValues[1].depthStencil = {1.0f, 0};
 
     VkRenderPassBeginInfo renderPassInfo{};
@@ -493,15 +389,27 @@ void Renderer::renderFrame(
     scissor.extent = m_swapchain->getExtent();
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    m_skyRenderer->recordRenderCommands(cmd, m_globalDescriptorSets[m_currentFrame]);
+    FrameContext frame;
+    frame.commandBuffer = cmd;
+    frame.frameIndex = m_currentFrame;
+    frame.globalDescriptorSet = m_globalDescriptorSets[m_currentFrame];
+    frame.camera = &camera;
+    frame.config = &config;
+    frame.time = time;
+    frame.screenSize = glm::vec2(
+        static_cast<float>(m_swapchain->getExtent().width),
+        static_cast<float>(m_swapchain->getExtent().height)
+    );
 
-    VkPipeline activePipeline = (config.wireframe && m_wireframePipeline != VK_NULL_HANDLE) ? m_wireframePipeline : m_solidPipeline;
+    m_skyRenderer->recordRenderCommands(frame);
+
+    VkPipeline activePipeline = (config.wireframe && static_cast<bool>(m_wireframePipeline)) ? m_wireframePipeline.get() : m_solidPipeline.get();
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
 
     vkCmdBindDescriptorSets(
         cmd,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
-        m_pipelineLayout,
+        m_pipelineLayout.get(),
         0,
         1,
         &m_globalDescriptorSets[m_currentFrame],
@@ -509,32 +417,30 @@ void Renderer::renderFrame(
         nullptr
     );
 
-    chunkManager.recordRenderCommands(cmd, m_pipelineLayout);
+    Frustum frustum = Frustum::fromViewProj(camera.getViewProjMatrix());
+    chunkManager.recordRenderCommands(cmd, m_pipelineLayout.get(), frustum, config);
 
     if (config.showFoliage && !config.wireframe) {
-        m_foliageRenderer->recordRenderCommands(cmd, m_pipelineLayout, m_globalDescriptorSets[m_currentFrame]);
+        m_foliageRenderer->recordRenderCommands(frame);
     }
 
     if (config.showWater && !config.wireframe) {
-        m_waterRenderer->recordRenderCommands(cmd, m_globalDescriptorSets[m_currentFrame], config, time, camera.getPosition());
+        m_waterRenderer->recordRenderCommands(frame);
     }
 
     drawHUD(camera, config, hudInfo);
     m_uiOverlay->end(m_currentFrame);
-    m_uiOverlay->recordCommands(
-        cmd,
-        m_currentFrame,
-        static_cast<float>(m_swapchain->getExtent().width),
-        static_cast<float>(m_swapchain->getExtent().height)
-    );
+    m_uiOverlay->recordCommands(cmd, m_currentFrame, frame.screenSize.x, frame.screenSize.y);
 
     vkCmdEndRenderPass(cmd);
     VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end command buffer recording");
+}
 
+void Renderer::submitFrame(VkCommandBuffer cmd, uint32_t imageIndex, GLFWwindow* window) {
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = {m_imageAvailableSemaphores[m_currentFrame]};
+    VkSemaphore waitSemaphores[] = {m_imageAvailableSemaphores[m_currentFrame].get()};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
@@ -542,11 +448,11 @@ void Renderer::renderFrame(
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &cmd;
 
-    VkSemaphore signalSemaphores[] = {m_renderFinishedSemaphores[m_currentFrame]};
+    VkSemaphore signalSemaphores[] = {m_renderFinishedSemaphores[m_currentFrame].get()};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    VK_CHECK(vkQueueSubmit(m_context.getGraphicsQueue(), 1, &submitInfo, m_inFlightFences[m_currentFrame]), "Failed to submit draw command buffer");
+    VK_CHECK(vkQueueSubmit(m_context.getGraphicsQueue(), 1, &submitInfo, m_inFlightFences[m_currentFrame].get()), "Failed to submit draw command buffer");
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -558,7 +464,7 @@ void Renderer::renderFrame(
     presentInfo.pSwapchains = swapchains;
     presentInfo.pImageIndices = &imageIndex;
 
-    result = vkQueuePresentKHR(m_context.getPresentQueue(), &presentInfo);
+    VkResult result = vkQueuePresentKHR(m_context.getPresentQueue(), &presentInfo);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized) {
         m_framebufferResized = false;
@@ -568,4 +474,38 @@ void Renderer::renderFrame(
     }
 
     m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void Renderer::renderFrame(
+    GLFWwindow* window,
+    const Camera& camera,
+    ChunkManager& chunkManager,
+    const TerrainConfig& config,
+    const HUDInfo& hudInfo,
+    float time
+) {
+    uint32_t imageIndex = 0;
+    if (!beginFrame(window, imageIndex)) {
+        return;
+    }
+
+    updateUBO(m_currentFrame, camera, config, time);
+
+    FoliageKey key;
+    key.seed = config.seed;
+    key.centerChunkX = chunkManager.getCenterChunkX();
+    key.centerChunkZ = chunkManager.getCenterChunkZ();
+    key.radius = chunkManager.getRadius();
+    key.showFoliage = config.showFoliage;
+    key.presetType = config.presetType;
+    key.waterHeight = config.waterHeight;
+    key.foliageDensity = config.foliageDensity;
+
+    if (!(key == m_lastFoliageKey)) {
+        m_lastFoliageKey = key;
+        m_foliageRenderer->updateInstances(m_context, chunkManager.getChunkOrigins(), config);
+    }
+
+    recordPass(m_commandBuffers[m_currentFrame], imageIndex, camera, chunkManager, config, hudInfo, time);
+    submitFrame(m_commandBuffers[m_currentFrame], imageIndex, window);
 }

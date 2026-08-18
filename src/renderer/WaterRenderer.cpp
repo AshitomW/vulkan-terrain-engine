@@ -1,6 +1,4 @@
 #include "renderer/WaterRenderer.hpp"
-#include <iostream>
-#include <vector>
 #include <cmath>
 
 WaterRenderer::WaterRenderer(const VulkanContext& context, VkRenderPass renderPass, VkDescriptorSetLayout uboSetLayout)
@@ -9,23 +7,11 @@ WaterRenderer::WaterRenderer(const VulkanContext& context, VkRenderPass renderPa
     createPipeline(context, renderPass, uboSetLayout);
 }
 
-WaterRenderer::~WaterRenderer() {
-    if (m_pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device, m_pipeline, nullptr);
-        m_pipeline = VK_NULL_HANDLE;
-    }
-    if (m_pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-        m_pipelineLayout = VK_NULL_HANDLE;
-    }
-    m_indexBuffer.destroy();
-    m_vertexBuffer.destroy();
-}
+WaterRenderer::~WaterRenderer() = default;
 
 void WaterRenderer::createMesh(const VulkanContext& context) {
     const uint32_t RES = EngineConstants::Water::WATER_GRID_RES;
     const float GRID_SPAN = 2400.0f;
-    const float HALF_SPAN = GRID_SPAN * 0.5f;
 
     std::vector<WaterVertex> vertices;
     vertices.reserve(RES * RES);
@@ -38,10 +24,7 @@ void WaterRenderer::createMesh(const VulkanContext& context) {
             float fX = static_cast<float>(x) / static_cast<float>(RES - 1);
             float posX = (fX - 0.5f) * GRID_SPAN;
 
-            WaterVertex v;
-            v.pos = glm::vec3(posX, 0.0f, posZ);
-            v.uv = glm::vec2(fX, fY);
-            vertices.push_back(v);
+            vertices.push_back({glm::vec3(posX, 0.0f, posZ), glm::vec2(fX, fY)});
         }
     }
 
@@ -80,7 +63,7 @@ void WaterRenderer::createMesh(const VulkanContext& context) {
     VulkanBuffer::copyBuffer(context, iStaging.getBuffer(), m_indexBuffer.getBuffer(), iSize);
 }
 
-void WaterRenderer::createPipeline(const VulkanContext&  , VkRenderPass renderPass, VkDescriptorSetLayout uboSetLayout) {
+void WaterRenderer::createPipeline(const VulkanContext&, VkRenderPass renderPass, VkDescriptorSetLayout uboSetLayout) {
     VkPushConstantRange pcRange{};
     pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pcRange.offset = 0;
@@ -93,129 +76,58 @@ void WaterRenderer::createPipeline(const VulkanContext&  , VkRenderPass renderPa
     layoutInfo.pushConstantRangeCount = 1;
     layoutInfo.pPushConstantRanges = &pcRange;
 
-    VK_CHECK(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout), "Failed to create water pipeline layout");
+    VkPipelineLayout layout;
+    VK_CHECK(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &layout), "Failed to create water pipeline layout");
+    m_pipelineLayout = vkh::PipelineLayoutHandle(
+        layout,
+        [device = m_device](VkPipelineLayout l) { vkDestroyPipelineLayout(device, l, nullptr); }
+    );
 
-    VkShaderModule vertShader = VulkanPipeline::createShaderModule(m_device, "shaders/water.vert.spv");
-    VkShaderModule fragShader = VulkanPipeline::createShaderModule(m_device, "shaders/water.frag.spv");
+    VkShaderModule vertShader = PipelineBuilder::createShaderModule(m_device, "shaders/water.vert.spv");
+    VkShaderModule fragShader = PipelineBuilder::createShaderModule(m_device, "shaders/water.frag.spv");
 
-    VkPipelineShaderStageCreateInfo vertStageInfo{};
-    vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStageInfo.module = vertShader;
-    vertStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo fragStageInfo{};
-    fragStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStageInfo.module = fragShader;
-    fragStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertStageInfo, fragStageInfo};
-
-    VkVertexInputBindingDescription binding{};
-    binding.binding = 0;
-    binding.stride = sizeof(WaterVertex);
-    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
+    std::vector<VkVertexInputBindingDescription> bindings = {
+        {0, sizeof(WaterVertex), VK_VERTEX_INPUT_RATE_VERTEX}
+    };
     std::vector<VkVertexInputAttributeDescription> attributes = {
         {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(WaterVertex, pos)},
         {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(WaterVertex, uv)}
     };
 
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &binding;
-    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributes.size());
-    vertexInputInfo.pVertexAttributeDescriptions = attributes.data();
+    PipelineBuilder builder;
+    builder.setVertexShader(vertShader)
+        .setFragmentShader(fragShader)
+        .setVertexInput(bindings, attributes)
+        .setCullMode(VK_CULL_MODE_NONE)
+        .setDepthState(true, false, VK_COMPARE_OP_LESS_OR_EQUAL)
+        .setBlendEnable(true)
+        .setPipelineLayout(layout)
+        .setRenderPass(renderPass);
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.lineWidth = 1.0f;
-
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_TRUE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-
-    std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = m_pipelineLayout;
-    pipelineInfo.renderPass = renderPass;
-    pipelineInfo.subpass = 0;
-
-    VK_CHECK(vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline), "Failed to create water graphics pipeline");
+    m_pipeline = vkh::PipelineHandle(
+        builder.build(m_device),
+        [device = m_device](VkPipeline p) { vkDestroyPipeline(device, p, nullptr); }
+    );
 
     vkDestroyShaderModule(m_device, vertShader, nullptr);
     vkDestroyShaderModule(m_device, fragShader, nullptr);
 }
 
-void WaterRenderer::recordRenderCommands(
-    VkCommandBuffer commandBuffer,
-    VkDescriptorSet uboDescriptorSet,
-    const TerrainConfig& config,
-    float time,
-    glm::vec3 cameraPos
-) {
+void WaterRenderer::recordRenderCommands(const FrameContext& frame) {
+    const TerrainConfig& config = *frame.config;
     if (!config.showWater) return;
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+    VkCommandBuffer cmd = frame.commandBuffer;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline.get());
 
     vkCmdBindDescriptorSets(
-        commandBuffer,
+        cmd,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
-        m_pipelineLayout,
+        m_pipelineLayout.get(),
         0,
         1,
-        &uboDescriptorSet,
+        &frame.globalDescriptorSet,
         0,
         nullptr
     );
@@ -223,17 +135,18 @@ void WaterRenderer::recordRenderCommands(
     const uint32_t RES = EngineConstants::Water::WATER_GRID_RES;
     const float GRID_SPAN = 2400.0f;
     float cellSize = GRID_SPAN / static_cast<float>(RES - 1);
-    float snappedX = std::floor(cameraPos.x / cellSize) * cellSize;
-    float snappedZ = std::floor(cameraPos.z / cellSize) * cellSize;
+    const glm::vec3& camPos = frame.camera->getPosition();
+    float snappedX = std::floor(camPos.x / cellSize) * cellSize;
+    float snappedZ = std::floor(camPos.z / cellSize) * cellSize;
 
     WaterPushConstants pc{};
-    pc.waterParams1 = glm::vec4(config.waterHeight, config.waveAmplitude, config.waveSpeed, time);
+    pc.waterParams1 = glm::vec4(config.waterHeight, config.waveAmplitude, config.waveSpeed, frame.time);
     pc.waterParams2 = glm::vec4(config.waterClarity, 1.0f, config.frequency, config.debugMode);
     pc.gridCenter = glm::vec4(snappedX, snappedZ, GRID_SPAN, 0.0f);
 
     vkCmdPushConstants(
-        commandBuffer,
-        m_pipelineLayout,
+        cmd,
+        m_pipelineLayout.get(),
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         0,
         sizeof(WaterPushConstants),
@@ -242,8 +155,8 @@ void WaterRenderer::recordRenderCommands(
 
     VkBuffer vBuffers[] = {m_vertexBuffer.getBuffer()};
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vBuffers, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.getBuffer(), 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindVertexBuffers(cmd, 0, 1, vBuffers, offsets);
+    vkCmdBindIndexBuffer(cmd, m_indexBuffer.getBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
-    vkCmdDrawIndexed(commandBuffer, m_indexCount, 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, m_indexCount, 1, 0, 0, 0);
 }

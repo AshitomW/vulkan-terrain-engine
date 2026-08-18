@@ -18,8 +18,6 @@ Application::Application(int width, int height, const char* title)
     m_camera->setAspectRatio(m_renderer->getAspectRatio());
 
     m_chunkManager->regenerateAll(*m_context, m_config);
-
-    printHelp();
 }
 
 Application::~Application() {
@@ -63,10 +61,6 @@ void Application::initWindow() {
     glfwSetKeyCallback(m_window, keyCallback);
 }
 
-void Application::printHelp() {
-
-}
-
 void Application::framebufferResizeCallback(GLFWwindow* window, int  , int  ) {
     auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
     if (app && app->m_renderer) {
@@ -82,7 +76,7 @@ void Application::cursorPosCallback(GLFWwindow* window, double xpos, double ypos
     }
 }
 
-void Application::mouseButtonCallback(GLFWwindow* window, int button, int action, int  ) {
+void Application::mouseButtonCallback(GLFWwindow* window, int, int action, int) {
     auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
     if (!app) return;
 

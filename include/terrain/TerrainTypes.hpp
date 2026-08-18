@@ -198,7 +198,7 @@ struct ComputePushConstants {
 };
 
 struct WaterPushConstants {
-    glm::vec4 waterParams1; // x: waterHeight, y: waveAmplitude, z: waveSpeed, w: time
-    glm::vec4 waterParams2; // x: clarity, y: causticsStrength, z: frequency, w: debugMode
-    glm::vec4 gridCenter;   // x: centerX, y: centerZ, z: gridRadius, w: unused
+    glm::vec4 waterParams1;
+    glm::vec4 waterParams2;
+    glm::vec4 gridCenter;
 };

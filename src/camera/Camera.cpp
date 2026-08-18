@@ -70,16 +70,6 @@ void Camera::onMouseMove(double xpos, double ypos) {
     updateVectors();
 }
 
-void Camera::onMouseButton(int button, int action, int  ) {
-    if (button == GLFW_MOUSE_BUTTON_RIGHT) {
-        if (action == GLFW_PRESS) {
-            m_isMouseCaptured = true;
-        } else if (action == GLFW_RELEASE) {
-            m_isMouseCaptured = false;
-        }
-    }
-}
-
 void Camera::setAspectRatio(float aspect) {
     m_aspect = aspect;
 }

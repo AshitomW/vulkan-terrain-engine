@@ -3,11 +3,15 @@
 #include "core/VulkanContext.hpp"
 #include "core/VulkanSwapchain.hpp"
 #include "core/VulkanBuffer.hpp"
-#include "core/VulkanPipeline.hpp"
+#include "core/PipelineBuilder.hpp"
+#include "core/VulkanResource.hpp"
+#include "core/Frustum.hpp"
 #include "renderer/UIOverlay.hpp"
 #include "renderer/FoliageRenderer.hpp"
 #include "renderer/SkyRenderer.hpp"
 #include "renderer/WaterRenderer.hpp"
+#include "renderer/FrameContext.hpp"
+#include "renderer/Atmosphere.hpp"
 #include "camera/Camera.hpp"
 #include "terrain/ChunkManager.hpp"
 #include "terrain/TerrainTypes.hpp"
@@ -20,6 +24,28 @@ struct HUDInfo {
     bool showHUD = true;
     bool mouseCaptured = true;
     const char* presetName = "Custom";
+};
+
+struct FoliageKey {
+    uint32_t seed = 0;
+    int centerChunkX = -9999;
+    int centerChunkZ = -9999;
+    int radius = -1;
+    bool showFoliage = true;
+    uint32_t presetType = 9999;
+    float waterHeight = -9999.0f;
+    float foliageDensity = -1.0f;
+
+    bool operator==(const FoliageKey& o) const {
+        return seed == o.seed &&
+            centerChunkX == o.centerChunkX &&
+            centerChunkZ == o.centerChunkZ &&
+            radius == o.radius &&
+            showFoliage == o.showFoliage &&
+            presetType == o.presetType &&
+            waterHeight == o.waterHeight &&
+            foliageDensity == o.foliageDensity;
+    }
 };
 
 class Renderer {
@@ -50,7 +76,15 @@ private:
     void createPipelines(VkDescriptorSetLayout chunkSSBOSetLayout);
     void createCommandBuffers();
     void createSyncObjects();
+
     void updateUBO(uint32_t currentFrame, const Camera& camera, const TerrainConfig& config, float time);
+
+    bool beginFrame(GLFWwindow* window, uint32_t& imageIndex);
+    void recordPass(VkCommandBuffer cmd, uint32_t imageIndex, const Camera& camera,
+                    ChunkManager& chunkManager, const TerrainConfig& config,
+                    const HUDInfo& hudInfo, float time);
+    void submitFrame(VkCommandBuffer cmd, uint32_t imageIndex, GLFWwindow* window);
+
     void drawHUD(const Camera& camera, const TerrainConfig& config, const HUDInfo& hudInfo);
 
 private:
@@ -63,30 +97,23 @@ private:
     std::unique_ptr<SkyRenderer> m_skyRenderer;
     std::unique_ptr<WaterRenderer> m_waterRenderer;
 
-    VkDescriptorSetLayout m_globalSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_globalDescriptorPool = VK_NULL_HANDLE;
+    vkh::DescriptorSetLayoutHandle m_globalSetLayout;
+    vkh::DescriptorPoolHandle m_globalDescriptorPool;
     std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> m_globalDescriptorSets{};
 
     std::array<VulkanBuffer, MAX_FRAMES_IN_FLIGHT> m_uboBuffers;
     std::array<void*, MAX_FRAMES_IN_FLIGHT> m_uboMapped{};
 
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_solidPipeline = VK_NULL_HANDLE;
-    VkPipeline m_wireframePipeline = VK_NULL_HANDLE;
+    vkh::PipelineLayoutHandle m_pipelineLayout;
+    vkh::PipelineHandle m_solidPipeline;
+    vkh::PipelineHandle m_wireframePipeline;
 
     std::array<VkCommandBuffer, MAX_FRAMES_IN_FLIGHT> m_commandBuffers{};
-    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_imageAvailableSemaphores{};
-    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_renderFinishedSemaphores{};
-    std::array<VkFence, MAX_FRAMES_IN_FLIGHT> m_inFlightFences{};
+    std::array<vkh::SemaphoreHandle, MAX_FRAMES_IN_FLIGHT> m_imageAvailableSemaphores;
+    std::array<vkh::SemaphoreHandle, MAX_FRAMES_IN_FLIGHT> m_renderFinishedSemaphores;
+    std::array<vkh::FenceHandle, MAX_FRAMES_IN_FLIGHT> m_inFlightFences;
 
     uint32_t m_currentFrame = 0;
     bool m_framebufferResized = false;
-    uint32_t m_lastFoliageSeed = 0;
-    int m_lastCenterChunkX = -9999;
-    int m_lastCenterChunkZ = -9999;
-    int m_lastRadius = -1;
-    bool m_lastShowFoliage = true;
-    uint32_t m_lastPresetType = 9999;
-    float m_lastWaterHeight = -9999.0f;
-    float m_lastFoliageDensity = -1.0f;
+    FoliageKey m_lastFoliageKey;
 };

@@ -2,10 +2,9 @@
 
 #include "core/VulkanContext.hpp"
 #include "core/VulkanBuffer.hpp"
-#include "core/VulkanPipeline.hpp"
-#include "terrain/TerrainTypes.hpp"
-#include <glm/glm.hpp>
-#include <vector>
+#include "core/PipelineBuilder.hpp"
+#include "core/VulkanResource.hpp"
+#include "renderer/FrameContext.hpp"
 
 struct WaterVertex {
     glm::vec3 pos;
@@ -20,15 +19,7 @@ public:
     WaterRenderer(const WaterRenderer&) = delete;
     WaterRenderer& operator=(const WaterRenderer&) = delete;
 
-    void recordRenderCommands(
-        VkCommandBuffer commandBuffer,
-        VkDescriptorSet uboDescriptorSet,
-        const TerrainConfig& config,
-        float time,
-        glm::vec3 cameraPos
-    );
-
-    VkPipelineLayout getPipelineLayout() const { return m_pipelineLayout; }
+    void recordRenderCommands(const FrameContext& frame);
 
 private:
     void createMesh(const VulkanContext& context);
@@ -36,8 +27,8 @@ private:
 
 private:
     VkDevice m_device = VK_NULL_HANDLE;
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_pipeline = VK_NULL_HANDLE;
+    vkh::PipelineHandle m_pipeline;
+    vkh::PipelineLayoutHandle m_pipelineLayout;
 
     VulkanBuffer m_vertexBuffer;
     VulkanBuffer m_indexBuffer;

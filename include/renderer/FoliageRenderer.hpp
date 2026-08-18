@@ -2,10 +2,11 @@
 
 #include "core/VulkanContext.hpp"
 #include "core/VulkanBuffer.hpp"
-#include "core/VulkanPipeline.hpp"
-#include "terrain/TerrainTypes.hpp"
+#include "core/PipelineBuilder.hpp"
+#include "core/VulkanResource.hpp"
+#include "renderer/FrameContext.hpp"
+#include <array>
 #include <vector>
-#include <memory>
 #include <glm/glm.hpp>
 
 struct FoliageVertex {
@@ -26,6 +27,8 @@ struct ModelMesh {
 
 class FoliageRenderer {
 public:
+    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
     FoliageRenderer(const VulkanContext& context, VkRenderPass renderPass, VkDescriptorSetLayout uboSetLayout);
     ~FoliageRenderer();
 
@@ -38,13 +41,7 @@ public:
         const TerrainConfig& config
     );
 
-    void recordRenderCommands(
-        VkCommandBuffer commandBuffer,
-        VkPipelineLayout pipelineLayout,
-        VkDescriptorSet uboDescriptorSet
-    );
-
-    VkPipelineLayout getPipelineLayout() const { return m_pipelineLayout; }
+    void recordRenderCommands(const FrameContext& frame);
 
 private:
     void createModels(const VulkanContext& context);
@@ -55,22 +52,21 @@ private:
         std::vector<FoliageInstance>& outInstances
     );
 
-    float sampleExactHeight(glm::vec2 worldPos, const TerrainConfig& config);
-    glm::vec3 sampleExactNormal(glm::vec2 worldPos, const TerrainConfig& config, float h);
+    float sampleExactHeight(glm::vec2 worldPos, const TerrainConfig& config) const;
+    glm::vec3 sampleExactNormal(glm::vec2 worldPos, const TerrainConfig& config, float h) const;
 
 private:
     VkDevice m_device = VK_NULL_HANDLE;
-    VkPipeline m_pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
+    vkh::PipelineHandle m_pipeline;
+    vkh::PipelineLayoutHandle m_pipelineLayout;
 
     VulkanBuffer m_vertexBuffer;
     VulkanBuffer m_indexBuffer;
-    uint32_t m_totalIndexCount = 0;
 
     std::vector<ModelMesh> m_modelMeshes;
 
     static constexpr size_t NUM_MODELS = 7;
     std::vector<std::vector<FoliageInstance>> m_instancesByType;
-    std::vector<VulkanBuffer> m_instanceBuffers;
-    std::vector<uint32_t> m_instanceCounts;
+    std::array<std::array<VulkanBuffer, MAX_FRAMES_IN_FLIGHT>, NUM_MODELS> m_instanceBuffers;
+    std::array<uint32_t, NUM_MODELS> m_instanceCounts{};
 };

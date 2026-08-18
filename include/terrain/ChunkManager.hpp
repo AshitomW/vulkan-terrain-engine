@@ -2,6 +2,8 @@
 
 #include "core/VulkanContext.hpp"
 #include "core/VulkanBuffer.hpp"
+#include "core/VulkanResource.hpp"
+#include "core/Frustum.hpp"
 #include "terrain/TerrainChunk.hpp"
 #include "terrain/ComputeTerrainGenerator.hpp"
 #include "terrain/TerrainTypes.hpp"
@@ -21,29 +23,24 @@ public:
     void regenerateAll(const VulkanContext& context, const TerrainConfig& config);
     void setRadius(const VulkanContext& context, int newRadius, const TerrainConfig& config);
 
-    void recordRenderCommands(VkCommandBuffer commandBuffer, VkPipelineLayout graphicsPipelineLayout);
+    void recordRenderCommands(VkCommandBuffer commandBuffer, VkPipelineLayout graphicsPipelineLayout,
+                              const Frustum& frustum, const TerrainConfig& config);
 
-    VkDescriptorSetLayout getSSBOSetLayout() const { return m_ssboSetLayout; }
+    VkDescriptorSetLayout getSSBOSetLayout() const { return m_ssboSetLayout.get(); }
     size_t getChunkCount() const { return m_chunks.size(); }
     int getRadius() const { return m_radius; }
     int getCenterChunkX() const { return m_centerChunkX; }
     int getCenterChunkZ() const { return m_centerChunkZ; }
 
-    std::vector<glm::vec2> getChunkOrigins() const {
-        std::vector<glm::vec2> origins;
-        origins.reserve(m_chunks.size());
-        for (const auto& chunk : m_chunks) {
-            origins.push_back(chunk->getWorldPos());
-        }
-        return origins;
-    }
+    const std::vector<glm::vec2>& getChunkOrigins() const { return m_chunkOrigins; }
 
 private:
-    void createDescriptorResources(const VulkanContext& context);
+    void createDescriptorResources();
     void createLODIndexBuffers(const VulkanContext& context);
+    void rebuildChunks(const VulkanContext& context);
+    void refreshChunkOrigins();
 
     static uint32_t getLODGridRes(uint32_t lod) {
-
         uint32_t step = 1u << lod;
         return (CHUNK_GRID_RES - 1u) / step + 1u;
     }
@@ -58,11 +55,13 @@ private:
     int m_centerChunkX = 0;
     int m_centerChunkZ = 0;
 
-    VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_ssboSetLayout = VK_NULL_HANDLE;
+    vkh::DescriptorPoolHandle m_descriptorPool;
+    vkh::DescriptorSetLayoutHandle m_ssboSetLayout;
 
     std::unique_ptr<ComputeTerrainGenerator> m_generator;
-    std::vector<std::unique_ptr<TerrainChunk>> m_chunks;
+    std::vector<TerrainChunk> m_chunks;
+    std::vector<glm::vec2> m_chunkOrigins;
+    std::vector<TerrainChunk*> m_dirtyChunks;
 
     std::array<VulkanBuffer, NUM_LOD_LEVELS> m_lodIndexBuffers;
     std::array<uint32_t, NUM_LOD_LEVELS> m_lodIndexCounts{};

@@ -1,6 +1,6 @@
 #include "renderer/FoliageRenderer.hpp"
 #include <cmath>
-#include <iostream>
+#include <cstring>
 #include <random>
 
 namespace {
@@ -176,26 +176,9 @@ FoliageRenderer::FoliageRenderer(const VulkanContext& context, VkRenderPass rend
     createPipeline(context, renderPass, uboSetLayout);
 
     m_instancesByType.resize(NUM_MODELS);
-    m_instanceBuffers.resize(NUM_MODELS);
-    m_instanceCounts.resize(NUM_MODELS, 0);
 }
 
-FoliageRenderer::~FoliageRenderer() {
-    for (auto& buf : m_instanceBuffers) {
-        buf.destroy();
-    }
-    m_vertexBuffer.destroy();
-    m_indexBuffer.destroy();
-
-    if (m_pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device, m_pipeline, nullptr);
-        m_pipeline = VK_NULL_HANDLE;
-    }
-    if (m_pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-        m_pipelineLayout = VK_NULL_HANDLE;
-    }
-}
+FoliageRenderer::~FoliageRenderer() = default;
 
 void FoliageRenderer::createModels(const VulkanContext& context) {
     std::vector<FoliageVertex> vertices;
@@ -335,7 +318,6 @@ void FoliageRenderer::createModels(const VulkanContext& context) {
         indices.push_back(qBase + 1); indices.push_back(qBase + 2); indices.push_back(qBase + 3);
     }
     m_modelMeshes[6].indexCount = static_cast<uint32_t>(indices.size()) - m_modelMeshes[6].firstIndex;
-    m_totalIndexCount = static_cast<uint32_t>(indices.size());
 
     VkDeviceSize vSize = sizeof(FoliageVertex) * vertices.size();
     VulkanBuffer vStaging(context, vSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -350,36 +332,26 @@ void FoliageRenderer::createModels(const VulkanContext& context) {
     VulkanBuffer::copyBuffer(context, iStaging.getBuffer(), m_indexBuffer.getBuffer(), iSize);
 }
 
-void FoliageRenderer::createPipeline(const VulkanContext& context, VkRenderPass renderPass, VkDescriptorSetLayout uboSetLayout) {
+void FoliageRenderer::createPipeline(const VulkanContext&, VkRenderPass renderPass, VkDescriptorSetLayout uboSetLayout) {
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts = &uboSetLayout;
 
-    VK_CHECK(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout), "Failed to create foliage pipeline layout");
+    VkPipelineLayout layout;
+    VK_CHECK(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &layout), "Failed to create foliage pipeline layout");
+    m_pipelineLayout = vkh::PipelineLayoutHandle(
+        layout,
+        [device = m_device](VkPipelineLayout l) { vkDestroyPipelineLayout(device, l, nullptr); }
+    );
 
-    VkShaderModule vertShader = VulkanPipeline::createShaderModule(m_device, "shaders/foliage.vert.spv");
-    VkShaderModule fragShader = VulkanPipeline::createShaderModule(m_device, "shaders/foliage.frag.spv");
-
-    VkPipelineShaderStageCreateInfo vertStageInfo{};
-    vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStageInfo.module = vertShader;
-    vertStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo fragStageInfo{};
-    fragStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStageInfo.module = fragShader;
-    fragStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertStageInfo, fragStageInfo};
+    VkShaderModule vertShader = PipelineBuilder::createShaderModule(m_device, "shaders/foliage.vert.spv");
+    VkShaderModule fragShader = PipelineBuilder::createShaderModule(m_device, "shaders/foliage.frag.spv");
 
     std::vector<VkVertexInputBindingDescription> bindings = {
         {0, sizeof(FoliageVertex), VK_VERTEX_INPUT_RATE_VERTEX},
         {1, sizeof(FoliageInstance), VK_VERTEX_INPUT_RATE_INSTANCE}
     };
-
     std::vector<VkVertexInputAttributeDescription> attributes = {
         {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FoliageVertex, pos)},
         {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FoliageVertex, normal)},
@@ -388,77 +360,25 @@ void FoliageRenderer::createPipeline(const VulkanContext& context, VkRenderPass 
         {4, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(FoliageInstance, params)}
     };
 
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindings.size());
-    vertexInputInfo.pVertexBindingDescriptions = bindings.data();
-    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributes.size());
-    vertexInputInfo.pVertexAttributeDescriptions = attributes.data();
+    PipelineBuilder builder;
+    builder.setVertexShader(vertShader)
+        .setFragmentShader(fragShader)
+        .setVertexInput(bindings, attributes)
+        .setCullMode(VK_CULL_MODE_NONE)
+        .setDepthState(true, true, VK_COMPARE_OP_LESS_OR_EQUAL)
+        .setPipelineLayout(layout)
+        .setRenderPass(renderPass);
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.lineWidth = 1.0f;
-
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-
-    std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = m_pipelineLayout;
-    pipelineInfo.renderPass = renderPass;
-    pipelineInfo.subpass = 0;
-
-    VK_CHECK(vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline), "Failed to create foliage graphics pipeline");
+    m_pipeline = vkh::PipelineHandle(
+        builder.build(m_device),
+        [device = m_device](VkPipeline p) { vkDestroyPipeline(device, p, nullptr); }
+    );
 
     vkDestroyShaderModule(m_device, vertShader, nullptr);
     vkDestroyShaderModule(m_device, fragShader, nullptr);
 }
 
-float FoliageRenderer::sampleExactHeight(glm::vec2 worldPos, const TerrainConfig& config) {
+float FoliageRenderer::sampleExactHeight(glm::vec2 worldPos, const TerrainConfig& config) const {
     float baseFreq = config.frequency * 0.004f;
     float amp = config.amplitude;
     float warpStrength = config.warpStrength;
@@ -489,7 +409,7 @@ float FoliageRenderer::sampleExactHeight(glm::vec2 worldPos, const TerrainConfig
     return (hIsland * wOcean + hHill * wHills + hMtn * wMountain + hCanyon * wCanyon) / totalWeight;
 }
 
-glm::vec3 FoliageRenderer::sampleExactNormal(glm::vec2 worldPos, const TerrainConfig& config, float  ) {
+glm::vec3 FoliageRenderer::sampleExactNormal(glm::vec2 worldPos, const TerrainConfig& config, float) const {
     float eps = CHUNK_CELL_SIZE * 0.5f;
     float hL = sampleExactHeight(worldPos - glm::vec2(eps, 0.0f), config);
     float hR = sampleExactHeight(worldPos + glm::vec2(eps, 0.0f), config);
@@ -637,9 +557,7 @@ void FoliageRenderer::updateInstances(
     }
 
     if (!config.showFoliage || config.foliageDensity <= 0.001f) {
-        for (size_t i = 0; i < NUM_MODELS; ++i) {
-            m_instanceCounts[i] = 0;
-        }
+        m_instanceCounts.fill(0);
         return;
     }
 
@@ -658,64 +576,62 @@ void FoliageRenderer::updateInstances(
     }
 
     for (uint32_t type = 0; type < NUM_MODELS; ++type) {
-        m_instanceCounts[type] = static_cast<uint32_t>(m_instancesByType[type].size());
-        if (m_instanceCounts[type] == 0) continue;
+        uint32_t count = static_cast<uint32_t>(m_instancesByType[type].size());
+        m_instanceCounts[type] = count;
+        if (count == 0) continue;
 
-        VkDeviceSize bufferSize = sizeof(FoliageInstance) * m_instanceCounts[type];
+        VkDeviceSize bufferSize = sizeof(FoliageInstance) * count;
+        for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
+            VulkanBuffer& buffer = m_instanceBuffers[type][f];
 
-        VulkanBuffer stagingBuffer(
-            context,
-            bufferSize,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-        );
-        stagingBuffer.copyFromHost(m_instancesByType[type].data(), bufferSize);
+            if (!buffer.isValid() || buffer.getSize() < bufferSize) {
+                buffer.create(
+                    context,
+                    bufferSize,
+                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                );
+            }
 
-        m_instanceBuffers[type].create(
-            context,
-            bufferSize,
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-        );
-
-        VulkanBuffer::copyBuffer(context, stagingBuffer.getBuffer(), m_instanceBuffers[type].getBuffer(), bufferSize);
+            void* dst = buffer.map();
+            std::memcpy(dst, m_instancesByType[type].data(), static_cast<size_t>(bufferSize));
+        }
     }
 }
 
-void FoliageRenderer::recordRenderCommands(
-    VkCommandBuffer commandBuffer,
-    VkPipelineLayout  ,
-    VkDescriptorSet uboDescriptorSet
-) {
+void FoliageRenderer::recordRenderCommands(const FrameContext& frame) {
     bool hasAny = false;
     for (uint32_t c : m_instanceCounts) {
         if (c > 0) { hasAny = true; break; }
     }
     if (!hasAny) return;
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+    VkCommandBuffer cmd = frame.commandBuffer;
+    uint32_t frameIndex = frame.frameIndex;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline.get());
 
     vkCmdBindDescriptorSets(
-        commandBuffer,
+        cmd,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
-        m_pipelineLayout,
+        m_pipelineLayout.get(),
         0,
         1,
-        &uboDescriptorSet,
+        &frame.globalDescriptorSet,
         0,
         nullptr
     );
 
-    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.getBuffer(), 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(cmd, m_indexBuffer.getBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
     for (uint32_t type = 0; type < NUM_MODELS; ++type) {
         if (m_instanceCounts[type] == 0) continue;
 
-        VkBuffer vBuffers[] = {m_vertexBuffer.getBuffer(), m_instanceBuffers[type].getBuffer()};
+        VkBuffer vBuffers[] = {m_vertexBuffer.getBuffer(), m_instanceBuffers[type][frameIndex].getBuffer()};
         VkDeviceSize offsets[] = {0, 0};
-        vkCmdBindVertexBuffers(commandBuffer, 0, 2, vBuffers, offsets);
+        vkCmdBindVertexBuffers(cmd, 0, 2, vBuffers, offsets);
 
         const auto& mesh = m_modelMeshes[type];
-        vkCmdDrawIndexed(commandBuffer, mesh.indexCount, m_instanceCounts[type], mesh.firstIndex, 0, 0);
+        vkCmdDrawIndexed(cmd, mesh.indexCount, m_instanceCounts[type], mesh.firstIndex, 0, 0);
     }
 }

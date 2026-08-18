@@ -3,6 +3,17 @@
 #include <cstring>
 #include <algorithm>
 
+#define VMA_IMPLEMENTATION
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnullability-completeness"
+#pragma GCC diagnostic ignored "-Wunused-private-field"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#pragma GCC diagnostic ignored "-Wmissing-braces"
+#include "core/vk_mem_alloc.h"
+#pragma GCC diagnostic pop
+
 static const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };
@@ -35,6 +46,7 @@ VulkanContext::VulkanContext(GLFWwindow* window, bool enableValidationLayers) {
     pickPhysicalDevice();
     createLogicalDevice();
     createCommandPool();
+    createAllocator();
 }
 
 VulkanContext::~VulkanContext() {
@@ -44,6 +56,11 @@ VulkanContext::~VulkanContext() {
         if (m_commandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(m_device, m_commandPool, nullptr);
             m_commandPool = VK_NULL_HANDLE;
+        }
+
+        if (m_allocator != VK_NULL_HANDLE) {
+            vmaDestroyAllocator(m_allocator);
+            m_allocator = VK_NULL_HANDLE;
         }
 
         vkDestroyDevice(m_device, nullptr);
@@ -247,6 +264,16 @@ void VulkanContext::createCommandPool() {
     VK_CHECK(vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool), "Failed to create command pool");
 }
 
+void VulkanContext::createAllocator() {
+    VmaAllocatorCreateInfo allocatorInfo{};
+    allocatorInfo.instance = m_instance;
+    allocatorInfo.physicalDevice = m_physicalDevice;
+    allocatorInfo.device = m_device;
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_2;
+
+    VK_CHECK(vmaCreateAllocator(&allocatorInfo, &m_allocator), "Failed to create VMA allocator");
+}
+
 uint32_t VulkanContext::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
@@ -292,17 +319,23 @@ VkCommandBuffer VulkanContext::beginSingleTimeCommands() const {
     return commandBuffer;
 }
 
-void VulkanContext::endSingleTimeCommands(VkCommandBuffer commandBuffer) const {
+void VulkanContext::executeSingleTimeCommands(VkCommandBuffer commandBuffer) const {
     VK_CHECK(vkEndCommandBuffer(commandBuffer), "Failed to end single time command buffer");
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &fence), "Failed to create single time fence");
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    VK_CHECK(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE), "Failed to submit single time command buffer");
-    vkQueueWaitIdle(m_graphicsQueue);
+    VK_CHECK(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, fence), "Failed to submit single time command buffer");
+    VK_CHECK(vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX), "Failed to wait for single time fence");
 
+    vkDestroyFence(m_device, fence, nullptr);
     vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
 }
 

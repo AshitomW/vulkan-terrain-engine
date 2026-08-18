@@ -27,18 +27,14 @@ SwapchainSupportDetails VulkanSwapchain::querySwapchainSupport(VkPhysicalDevice 
 VulkanSwapchain::VulkanSwapchain(const VulkanContext& context, GLFWwindow* window)
     : m_device(context.getDevice()) {
     createSwapchain(context, window);
-    createImageViews(context);
-    createRenderPass(context);
+    createImageViews();
+    createRenderPass();
     createDepthResources(context);
-    createFramebuffers(context);
+    createFramebuffers();
 }
 
 VulkanSwapchain::~VulkanSwapchain() {
     cleanup();
-    if (m_renderPass != VK_NULL_HANDLE) {
-        vkDestroyRenderPass(m_device, m_renderPass, nullptr);
-        m_renderPass = VK_NULL_HANDLE;
-    }
 }
 
 void VulkanSwapchain::cleanup() {
@@ -46,19 +42,6 @@ void VulkanSwapchain::cleanup() {
         vkDestroyFramebuffer(m_device, framebuffer, nullptr);
     }
     m_framebuffers.clear();
-
-    if (m_depthImageView != VK_NULL_HANDLE) {
-        vkDestroyImageView(m_device, m_depthImageView, nullptr);
-        m_depthImageView = VK_NULL_HANDLE;
-    }
-    if (m_depthImage != VK_NULL_HANDLE) {
-        vkDestroyImage(m_device, m_depthImage, nullptr);
-        m_depthImage = VK_NULL_HANDLE;
-    }
-    if (m_depthImageMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(m_device, m_depthImageMemory, nullptr);
-        m_depthImageMemory = VK_NULL_HANDLE;
-    }
 
     for (auto imageView : m_imageViews) {
         vkDestroyImageView(m_device, imageView, nullptr);
@@ -84,9 +67,9 @@ void VulkanSwapchain::recreate(const VulkanContext& context, GLFWwindow* window)
     cleanup();
 
     createSwapchain(context, window);
-    createImageViews(context);
+    createImageViews();
     createDepthResources(context);
-    createFramebuffers(context);
+    createFramebuffers();
 }
 
 VkSurfaceFormatKHR VulkanSwapchain::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
@@ -185,7 +168,7 @@ void VulkanSwapchain::createSwapchain(const VulkanContext& context, GLFWwindow* 
     m_depthFormat = findDepthFormat(context);
 }
 
-void VulkanSwapchain::createImageViews(const VulkanContext& context) {
+void VulkanSwapchain::createImageViews() {
     m_imageViews.resize(m_images.size());
 
     for (size_t i = 0; i < m_images.size(); i++) {
@@ -208,7 +191,7 @@ void VulkanSwapchain::createImageViews(const VulkanContext& context) {
     }
 }
 
-void VulkanSwapchain::createRenderPass(const VulkanContext& context) {
+void VulkanSwapchain::createRenderPass() {
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = m_imageFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -261,64 +244,40 @@ void VulkanSwapchain::createRenderPass(const VulkanContext& context) {
     renderPassInfo.dependencyCount = 1;
     renderPassInfo.pDependencies = &dependency;
 
-    VK_CHECK(vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass), "Failed to create render pass");
+    VkRenderPass renderPass;
+    VK_CHECK(vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &renderPass), "Failed to create render pass");
+    m_renderPass = vkh::RenderPassHandle(
+        renderPass,
+        [device = m_device](VkRenderPass rp) { vkDestroyRenderPass(device, rp, nullptr); }
+    );
 }
 
 void VulkanSwapchain::createDepthResources(const VulkanContext& context) {
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = m_extent.width;
-    imageInfo.extent.height = m_extent.height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = m_depthFormat;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_depthImage), "Failed to create depth image");
-
-    VkMemoryRequirements memRequirements;
-    vkGetImageMemoryRequirements(m_device, m_depthImage, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = context.findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_depthImageMemory), "Failed to allocate depth image memory");
-    VK_CHECK(vkBindImageMemory(m_device, m_depthImage, m_depthImageMemory, 0), "Failed to bind depth image memory");
-
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = m_depthImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = m_depthFormat;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &m_depthImageView), "Failed to create depth image view");
+    m_depthImage.create(
+        context,
+        m_extent.width,
+        m_extent.height,
+        m_depthFormat,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_IMAGE_ASPECT_DEPTH_BIT
+    );
 }
 
-void VulkanSwapchain::createFramebuffers(const VulkanContext& context) {
+void VulkanSwapchain::createFramebuffers() {
     m_framebuffers.resize(m_imageViews.size());
+
+    VkRenderPass renderPass = m_renderPass.get();
+    VkImageView depthView = m_depthImage.getView();
 
     for (size_t i = 0; i < m_imageViews.size(); i++) {
         std::array<VkImageView, 2> attachments = {
             m_imageViews[i],
-            m_depthImageView
+            depthView
         };
 
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebufferInfo.renderPass = m_renderPass;
+        framebufferInfo.renderPass = renderPass;
         framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
         framebufferInfo.pAttachments = attachments.data();
         framebufferInfo.width = m_extent.width;
